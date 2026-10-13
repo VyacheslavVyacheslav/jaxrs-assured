@@ -1,0 +1,518 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Bookstore API",
+    "version": "1.0.0",
+    "description": "Учебная спека jaxrs-assured: книжный магазин. Собраны формы, которые выдаёт @nestjs/swagger и которые разбирает генератор: выборки allOf [PageDto, data], ссылки с описанием allOf [$ref], энумы, файлы, SSE, html."
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "HealthController_check",
+        "description": "Служебная ручка вне /api/v1 — в генерации пропускается через ignorePaths.",
+        "responses": {
+          "200": {"description": "Сервис жив", "content": {"text/plain": {"schema": {"type": "string"}}}}
+        }
+      }
+    },
+    "/api/v1/books": {
+      "get": {
+        "operationId": "BooksController_findAll",
+        "description": "Постраничная выборка книг.",
+        "parameters": [
+          {"name": "page", "in": "query", "required": false, "description": "Номер страницы, с единицы", "schema": {"type": "number"}},
+          {"name": "limit", "in": "query", "required": false, "description": "Размер страницы", "schema": {"type": "number"}},
+          {"name": "authorId", "in": "query", "required": false, "description": "Только книги автора", "schema": {"type": "number"}},
+          {"name": "genre", "in": "query", "required": false, "description": "Код жанра", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Страница книг",
+            "content": {"application/json": {"schema": {"allOf": [
+              {"$ref": "#/components/schemas/PageDto"},
+              {"properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Book"}}}}
+            ]}}}
+          },
+          "400": {"description": "Параметры выборки не прошли проверку", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiErrorDto"}}}}
+        }
+      },
+      "post": {
+        "operationId": "BooksController_create",
+        "description": "Добавить книгу.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateBookDto"}}}},
+        "responses": {
+          "201": {"description": "Книга добавлена", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Book"}}}},
+          "400": {"description": "Тело не прошло проверку", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiErrorDto"}}}}
+        }
+      }
+    },
+    "/api/v1/books/{id}": {
+      "get": {
+        "operationId": "BooksController_findOne",
+        "parameters": [{"name": "id", "in": "path", "required": true, "description": "Идентификатор книги", "schema": {"type": "number"}}],
+        "responses": {
+          "200": {"description": "Книга", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Book"}}}},
+          "404": {"description": "Книги нет", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiErrorDto"}}}}
+        }
+      },
+      "patch": {
+        "operationId": "BooksController_patch",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "number"}}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PatchBookDto"}}}},
+        "responses": {
+          "200": {"description": "Книга после правки", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Book"}}}},
+          "404": {"description": "Книги нет", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiErrorDto"}}}}
+        }
+      },
+      "delete": {
+        "operationId": "BooksController_remove",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "number"}}],
+        "responses": {
+          "204": {"description": "Книга удалена"}
+        }
+      }
+    },
+    "/api/v1/books/snapshots": {
+      "post": {
+        "operationId": "BookSnapshotsController_sync",
+        "description": "Синхронизация каталога с внешней системой: снимок целиком.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SyncBooksDto"}}}},
+        "responses": {
+          "200": {"description": "Итог синхронизации", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SnapshotSyncResultDto"}}}}
+        }
+      }
+    },
+    "/api/v1/catalog/genres": {
+      "get": {
+        "operationId": "GenresController_findAll",
+        "description": "Справочник жанров. Параметр ids сужает выдачу до названных кодов.",
+        "parameters": [{"name": "ids", "in": "query", "required": false, "description": "Коды через запятую, например «FICTION,SCIENCE»", "schema": {"type": "string"}}],
+        "responses": {
+          "200": {
+            "description": "Записи справочника",
+            "content": {"application/json": {"schema": {"allOf": [
+              {"$ref": "#/components/schemas/PageDto"},
+              {"properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Genre"}}}}
+            ]}}}
+          }
+        }
+      }
+    },
+    "/api/v1/catalog/genres/{id}": {
+      "get": {
+        "operationId": "GenresController_findOne",
+        "parameters": [{"name": "id", "in": "path", "required": true, "description": "Код жанра", "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "Запись справочника", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Genre"}}}},
+          "404": {"description": "Жанра нет", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiErrorDto"}}}}
+        }
+      }
+    },
+    "/api/v1/authors": {
+      "get": {
+        "operationId": "AuthorsController_findAll",
+        "parameters": [
+          {"name": "page", "in": "query", "required": false, "schema": {"type": "number"}},
+          {"name": "limit", "in": "query", "required": false, "schema": {"type": "number"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Страница авторов",
+            "content": {"application/json": {"schema": {"allOf": [
+              {"$ref": "#/components/schemas/PageDto"},
+              {"properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Author"}}}}
+            ]}}}
+          }
+        }
+      }
+    },
+    "/api/v1/authors/{id}": {
+      "get": {
+        "operationId": "AuthorsController_findOne",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "Автор", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Author"}}}}
+        }
+      }
+    },
+    "/api/v1/authors/{id}/photo": {
+      "get": {
+        "operationId": "AuthorsController_photo",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "Фото автора", "content": {"image/png": {"schema": {"type": "string", "format": "binary"}}}}
+        }
+      }
+    },
+    "/api/v1/authors/{authorId}/books": {
+      "get": {
+        "operationId": "AuthorBooksController_findAll",
+        "parameters": [
+          {"name": "authorId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "page", "in": "query", "required": false, "schema": {"type": "number"}},
+          {"name": "format", "in": "query", "required": false, "description": "Только книги в этом формате — $ref на энум со значениями не как имена констант", "schema": {"$ref": "#/components/schemas/BookFormat"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Книги автора",
+            "content": {"application/json": {"schema": {"allOf": [
+              {"$ref": "#/components/schemas/PageDto"},
+              {"properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/Book"}}}}
+            ]}}}
+          }
+        }
+      }
+    },
+    "/api/v1/orders": {
+      "get": {
+        "operationId": "OrdersController_findAll",
+        "parameters": [
+          {"name": "status", "in": "query", "required": false, "schema": {"type": "string", "enum": ["NEW", "PAID", "SHIPPED", "DELIVERED", "CANCELLED"]}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Страница заказов",
+            "content": {"application/json": {"schema": {"allOf": [
+              {"$ref": "#/components/schemas/PageDto"},
+              {"properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/OrderDto"}}}}
+            ]}}}
+          }
+        }
+      },
+      "post": {
+        "operationId": "OrdersController_create",
+        "description": "Оформить заказ. Асинхронно: результат — в событиях операций.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CreateOrderDto"}}}},
+        "responses": {
+          "202": {"description": "Заказ принят", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ActionAcceptedDto"}}}},
+          "400": {"description": "Тело не прошло проверку", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiErrorDto"}}}}
+        }
+      }
+    },
+    "/api/v1/orders/{id}": {
+      "get": {
+        "operationId": "OrdersController_findOne",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "Заказ", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OrderDto"}}}},
+          "404": {"description": "Заказа нет", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiErrorDto"}}}}
+        }
+      }
+    },
+    "/api/v1/orders/{id}/receipt": {
+      "get": {
+        "operationId": "OrdersController_receipt",
+        "description": "Чек заказа для печати.",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "HTML-страница чека", "content": {"text/html; charset=utf-8": {"schema": {"type": "string"}}}}
+        }
+      }
+    },
+    "/api/v1/gift-cards": {
+      "get": {
+        "operationId": "GiftCardsController_findAll",
+        "responses": {
+          "200": {
+            "description": "Подарочные карты",
+            "content": {"application/json": {"schema": {"allOf": [
+              {"$ref": "#/components/schemas/PageDto"},
+              {"properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/GiftCardDto"}}}}
+            ]}}}
+          }
+        }
+      }
+    },
+    "/api/v1/gift-cards/{code}": {
+      "get": {
+        "operationId": "GiftCardsController_findOne",
+        "parameters": [{"name": "code", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "Подарочная карта", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/GiftCardDto"}}}}
+        }
+      }
+    },
+    "/api/v1/reports/archives": {
+      "post": {
+        "operationId": "ReportArchivesController_create",
+        "description": "Несколько отчётов одним zip-архивом.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ArchiveRequestDto"}}}},
+        "responses": {
+          "200": {"description": "Архив отчётов", "content": {"application/zip": {"schema": {"type": "string", "format": "binary"}}}}
+        }
+      }
+    },
+    "/api/v1/reports/{id}/file": {
+      "get": {
+        "operationId": "ReportsController_file",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "Файл отчёта", "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}
+        }
+      }
+    },
+    "/api/v1/events/orders": {
+      "get": {
+        "operationId": "EventsController_orders",
+        "description": "Поток событий заказов (Server-Sent Events). Продолжение после обрыва — по Last-Event-ID или lastEventId.",
+        "parameters": [
+          {"name": "last-event-id", "in": "header", "required": false, "schema": {"type": "string"}},
+          {"name": "lastEventId", "in": "query", "required": false, "schema": {"type": "string"}},
+          {"name": "ticket", "in": "query", "required": false, "description": "Одноразовый билет вместо Authorization — EventSource заголовки не шлёт", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "Поток событий", "content": {"text/event-stream": {"schema": {"type": "string"}}}}
+        }
+      }
+    },
+    "/api/v1/operations/{id}": {
+      "get": {
+        "operationId": "OperationsController_findOne",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {"description": "Состояние операции", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OperationStatusDto"}}}}
+        }
+      }
+    },
+    "/api/v1/history": {
+      "get": {
+        "operationId": "HistoryController_findAll",
+        "parameters": [{"name": "entity", "in": "query", "required": false, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {
+            "description": "Журнал изменений",
+            "content": {"application/json": {"schema": {"allOf": [
+              {"$ref": "#/components/schemas/PageDto"},
+              {"properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/HistoryEntryDto"}}}}
+            ]}}}
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "PageDto": {
+        "type": "object",
+        "description": "Конверт выборки: { data, total, page, limit }.",
+        "properties": {
+          "data": {"type": "array", "items": {}, "description": "Записи текущей страницы"},
+          "total": {"type": "number", "description": "Всего записей по запросу"},
+          "page": {"type": "number", "description": "Номер страницы, с единицы"},
+          "limit": {"type": "number", "description": "Размер страницы"}
+        },
+        "required": ["data", "total", "page", "limit"]
+      },
+      "ApiErrorDto": {
+        "type": "object",
+        "description": "Ошибка API.",
+        "properties": {
+          "code": {"type": "string", "description": "Машиночитаемая причина: NOT_FOUND, VALIDATION_FAILED и т.п.", "example": "NOT_FOUND"},
+          "message": {"type": "string", "description": "Сообщение для человека"},
+          "details": {"type": "object", "additionalProperties": true, "description": "Подробности: какие поля не прошли проверку"},
+          "status": {"type": "number", "description": "Код HTTP, тот же, что в статусе ответа", "example": 404},
+          "timestamp": {"type": "string", "format": "date-time"},
+          "traceId": {"type": "string", "description": "Идентификатор трассировки"}
+        },
+        "required": ["code", "message", "status", "timestamp"]
+      },
+      "Genre": {
+        "type": "object",
+        "description": "Жанр — запись справочника.",
+        "properties": {
+          "code": {"type": "string", "enum": ["FICTION", "NON_FICTION", "SCIENCE", "CHILDREN"], "description": "Код жанра"},
+          "title": {"type": "string", "description": "Название"},
+          "titleEn": {"type": "string", "description": "Название по-английски"},
+          "displayOrder": {"type": "number", "description": "Порядок показа"},
+          "active": {"type": "boolean", "description": "Показывается ли в интерфейсе"},
+          "createdAt": {"type": "string", "format": "date-time"},
+          "updatedAt": {"type": "string", "format": "date-time"}
+        },
+        "required": ["code", "title", "displayOrder", "active", "createdAt"]
+      },
+      "BookFormat": {
+        "type": "string",
+        "enum": ["hardcover", "paperback", "e_book"],
+        "description": "Формат издания."
+      },
+      "Book": {
+        "type": "object",
+        "description": "Книга.",
+        "properties": {
+          "id": {"type": "integer", "description": "Идентификатор"},
+          "title": {"type": "string", "description": "Название"},
+          "authorId": {"type": "integer", "description": "Автор"},
+          "price": {"type": "number", "description": "Цена, может быть дробной", "example": 12.5},
+          "rating": {"type": "number", "description": "Средняя оценка, от 0 до 5"},
+          "genre": {"description": "Жанр книги", "allOf": [{"$ref": "#/components/schemas/Genre"}]},
+          "format": {"$ref": "#/components/schemas/BookFormat"},
+          "tags": {"type": "array", "items": {"type": "string", "enum": ["bestseller", "new", "sale"]}, "description": "Метки витрины"},
+          "publishedAt": {"type": "string", "format": "date-time"}
+        },
+        "required": ["id", "title", "price", "format"]
+      },
+      "CreateBookDto": {
+        "type": "object",
+        "properties": {
+          "title": {"type": "string"},
+          "authorId": {"type": "integer"},
+          "price": {"type": "number"},
+          "genreCode": {"type": "string"},
+          "format": {"$ref": "#/components/schemas/BookFormat"},
+          "tags": {"type": "array", "items": {"type": "string", "enum": ["bestseller", "new", "sale"]}}
+        },
+        "required": ["title", "price"]
+      },
+      "PatchBookDto": {
+        "type": "object",
+        "properties": {
+          "title": {"type": "string"},
+          "price": {"type": "number"},
+          "rating": {"type": "number"}
+        }
+      },
+      "SyncBooksDto": {
+        "type": "object",
+        "properties": {
+          "items": {"type": "array", "items": {"$ref": "#/components/schemas/BookSyncItemDto"}, "description": "Снимок каталога целиком"}
+        },
+        "required": ["items"]
+      },
+      "BookSyncItemDto": {
+        "type": "object",
+        "properties": {
+          "externalId": {"type": "string", "description": "Идентификатор во внешней системе"},
+          "title": {"type": "string"},
+          "price": {"type": "number"}
+        },
+        "required": ["externalId"]
+      },
+      "SnapshotSyncResultDto": {
+        "type": "object",
+        "properties": {
+          "created": {"type": "integer"},
+          "updated": {"type": "integer"},
+          "skipped": {"type": "integer"}
+        }
+      },
+      "Author": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "address": {"description": "Адрес для корреспонденции", "nullable": true, "type": "object", "allOf": [{"$ref": "#/components/schemas/Address"}]},
+          "rating": {"type": "number"}
+        },
+        "required": ["id", "name"]
+      },
+      "Address": {
+        "type": "object",
+        "properties": {
+          "city": {"type": "string"},
+          "street": {"type": "string"},
+          "lat": {"type": "number", "description": "Широта", "example": 55.7558},
+          "lng": {"type": "number", "description": "Долгота", "example": 37.6173}
+        },
+        "required": ["city"]
+      },
+      "OrderStatus": {
+        "type": "string",
+        "enum": ["NEW", "PAID", "SHIPPED", "DELIVERED", "CANCELLED"],
+        "description": "Статус заказа."
+      },
+      "OrderDto": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "status": {"description": "Текущий статус", "allOf": [{"$ref": "#/components/schemas/OrderStatus"}]},
+          "items": {"type": "array", "items": {"$ref": "#/components/schemas/OrderItemDto"}},
+          "total": {"type": "number", "description": "Сумма заказа"},
+          "deliveryAddress": {"description": "Куда доставить", "nullable": true, "type": "object", "allOf": [{"$ref": "#/components/schemas/Address"}]},
+          "createdAt": {"type": "string", "format": "date-time"}
+        },
+        "required": ["id", "status", "items", "total"]
+      },
+      "OrderItemDto": {
+        "type": "object",
+        "properties": {
+          "bookId": {"type": "integer"},
+          "quantity": {"type": "integer"},
+          "price": {"type": "number"}
+        },
+        "required": ["bookId", "quantity"]
+      },
+      "CreateOrderDto": {
+        "type": "object",
+        "properties": {
+          "items": {"type": "array", "items": {"$ref": "#/components/schemas/OrderItemDto"}},
+          "deliveryAddress": {"$ref": "#/components/schemas/Address"},
+          "comment": {"type": "string"}
+        },
+        "required": ["items"]
+      },
+      "ActionAcceptedDto": {
+        "type": "object",
+        "properties": {
+          "operationId": {"type": "string", "description": "По нему результат ищется в событиях операций"}
+        },
+        "required": ["operationId"]
+      },
+      "GiftCardDto": {
+        "type": "object",
+        "properties": {
+          "code": {"type": "string"},
+          "balance": {"type": "number"},
+          "currency": {"type": "string"},
+          "expiresAt": {"type": "string", "format": "date-time"}
+        },
+        "required": ["code", "balance"]
+      },
+      "ArchiveRequestDto": {
+        "type": "object",
+        "properties": {
+          "reportIds": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["reportIds"]
+      },
+      "OperationStatusDto": {
+        "type": "object",
+        "description": "Состояние асинхронной операции. Поля result и other — тёзки локальных переменных в сгенерированных методах.",
+        "properties": {
+          "id": {"type": "string"},
+          "state": {"type": "string", "enum": ["pending", "done", "failed"]},
+          "result": {"type": "object", "additionalProperties": true, "description": "Результат, форма зависит от операции"},
+          "other": {"type": "string"},
+          "error": {"$ref": "#/components/schemas/ApiErrorDto"}
+        },
+        "required": ["id", "state"]
+      },
+      "HistoryEntryDto": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "entity": {"type": "string"},
+          "changedAt": {"type": "string", "format": "date-time"},
+          "changes": {"type": "array", "items": {"$ref": "#/components/schemas/HistoryFieldChangeDto"}},
+          "snapshot": {"type": "object", "additionalProperties": true, "description": "Состояние сущности после изменения"}
+        }
+      },
+      "HistoryFieldChangeDto": {
+        "type": "object",
+        "properties": {
+          "field": {"type": "string"},
+          "from": {"description": "Прежнее значение", "anyOf": [{"type": "string", "nullable": true}, {"type": "number", "nullable": true}, {"type": "boolean", "nullable": true}]},
+          "to": {"description": "Новое значение", "anyOf": [{"type": "string", "nullable": true}, {"type": "number", "nullable": true}, {"type": "boolean", "nullable": true}]}
+        }
+      },
+      "LegacyBookDto": {
+        "type": "object",
+        "description": "Устаревшая форма книги: ни одна ручка на неё не ссылается.",
+        "properties": {
+          "isbn": {"type": "string"},
+          "syncItem": {"$ref": "#/components/schemas/BookSyncItemDto"},
+          "format": {"$ref": "#/components/schemas/BookFormat"}
+        }
+      }
+    }
+  }
+}

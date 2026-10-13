@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.github.vyacheslavvyacheslav</groupId>
+        <artifactId>jaxrs-assured-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <!--
+        Интеграционные тесты: учебная спека docs/openapi/bookstore.json генерируется плагином из jaxrs-assured-codegen
+        на фазе generate-test-sources, результат компилируется вместе с тестами и сверяется. Это и живой пример
+        подключения плагина: конфигурация такая же, как в проекте-потребителе. Своего кода у модуля нет,
+        в репозиторий он не ставится.
+    -->
+    <artifactId>jaxrs-assured-integration-tests</artifactId>
+    <name>jaxrs-assured-integration-tests</name>
+
+    <properties>
+        <maven.install.skip>true</maven.install.skip>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
+    <dependencies>
+        <!-- core — сквозной тест на его прокси; он же приносит всё, что нужно сгенерированному коду
+             (JAX-RS API, Jackson): отдельно их подключать не нужно -->
+        <dependency>
+            <groupId>io.github.vyacheslavvyacheslav</groupId>
+            <artifactId>jaxrs-assured-core</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Для вывода в стиле Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${logback.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>io.github.vyacheslavvyacheslav</groupId>
+                <artifactId>jaxrs-assured-codegen</artifactId>
+                <version>${project.version}</version>
+                <!-- Общее для всех запусков -->
+                <configuration>
+                    <spec>${project.basedir}/../docs/openapi/bookstore.json</spec>
+                    <testSources>true</testSources>
+                    <ignorePaths>
+                        <ignorePath>^/health$</ignorePath>
+                    </ignorePaths>
+                </configuration>
+                <executions>
+                    <!-- Обычная Java, плоский model: GeneratedCodeTest -->
+                    <execution>
+                        <id>plain</id>
+                        <phase>generate-test-sources</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/generated-test-sources/plain</outputDirectory>
+                            <basePackage>io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain</basePackage>
+                        </configuration>
+                    </execution>
+                    <!-- DTO по подпакетам групп путей: SplitModelTest -->
+                    <execution>
+                        <id>split</id>
+                        <phase>generate-test-sources</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/generated-test-sources/split</outputDirectory>
+                            <basePackage>io.github.vyacheslavvyacheslav.jaxrsassured.integration.split</basePackage>
+                            <splitModel>true</splitModel>
+                        </configuration>
+                    </execution>
+                    <!-- DTO на Lombok: DtoStyleContractTest сверяет оба стиля -->
+                    <execution>
+                        <id>lombok</id>
+                        <phase>generate-test-sources</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/generated-test-sources/lombok</outputDirectory>
+                            <basePackage>io.github.vyacheslavvyacheslav.jaxrsassured.integration.lombok</basePackage>
+                            <lombok>true</lombok>
+                        </configuration>
+                    </execution>
+                    <!-- Ресурсы на ConfigurationResource из core: EndToEndTest против локального сервера -->
+                    <execution>
+                        <id>e2e</id>
+                        <phase>generate-test-sources</phase>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/generated-test-sources/e2e</outputDirectory>
+                            <basePackage>io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e</basePackage>
+                            <superInterface>io.github.vyacheslavvyacheslav.jaxrsassured.core.clients.ConfigurationResource</superInterface>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <executions>
+                    <!-- Lombok-процессор для вывода в стиле Lombok; с JDK 23 javac сам процессоры с classpath
+                         не запускает, поэтому путь задан явно -->
+                    <execution>
+                        <id>default-testCompile</id>
+                        <configuration>
+                            <annotationProcessorPaths>
+                                <path>
+                                    <groupId>org.projectlombok</groupId>
+                                    <artifactId>lombok</artifactId>
+                                    <version>${lombok.version}</version>
+                                </path>
+                            </annotationProcessorPaths>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Основного кода нет: пустой jar не собираем -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <skipIfEmpty>true</skipIfEmpty>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

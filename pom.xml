@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>io.github.vyacheslavvyacheslav</groupId>
+    <artifactId>jaxrs-assured-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>jaxrs-assured</name>
+    <description>
+        Типизированные JAX-RS-клиенты для API-тестов: прокси RestEasy с настройкой запроса на ходу
+        и проверками ответа в стиле rest-assured, плюс генерация клиентов из OpenAPI.
+    </description>
+    <url>https://github.com/VyacheslavVyacheslav/jaxrs-assured</url>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>VyacheslavVyacheslav</id>
+            <url>https://github.com/VyacheslavVyacheslav</url>
+        </developer>
+    </developers>
+
+    <scm>
+        <url>https://github.com/VyacheslavVyacheslav/jaxrs-assured</url>
+        <connection>scm:git:https://github.com/VyacheslavVyacheslav/jaxrs-assured.git</connection>
+        <developerConnection>scm:git:git@github.com:VyacheslavVyacheslav/jaxrs-assured.git</developerConnection>
+    </scm>
+
+    <!--
+        jaxrs-assured-core              — фреймворк: прокси RestEasy, ConfigurationResource (настройка запроса
+                                          на ходу), AssuredResource (ответ для проверок rest-assured).
+        jaxrs-assured-codegen           — генератор JAX-RS-интерфейсов и DTO из OpenAPI: Maven-плагин, CLI, cli-jar.
+        jaxrs-assured-integration-tests — интеграционные тесты генератора и сквозной тест «сгенерированный
+                                          клиент + core» на учебной спеке docs/openapi/bookstore.json.
+    -->
+    <modules>
+        <module>jaxrs-assured-core</module>
+        <module>jaxrs-assured-codegen</module>
+        <module>jaxrs-assured-integration-tests</module>
+    </modules>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>17</maven.compiler.release>
+
+        <resteasy.version>6.2.12.Final</resteasy.version>
+        <rest-assured.version>5.4.0</rest-assured.version>
+        <jakarta-ws-rs.version>3.1.0</jakarta-ws-rs.version>
+        <slf4j.version>2.0.17</slf4j.version>
+        <logback.version>1.5.18</logback.version>
+
+        <swagger-parser.version>2.1.22</swagger-parser.version>
+        <javapoet.version>1.13.0</javapoet.version>
+        <maven.version>3.9.9</maven.version>
+        <maven-plugin-tools.version>3.9.0</maven-plugin-tools.version>
+
+        <junit.version>5.10.2</junit.version>
+        <lombok.version>1.18.48</lombok.version>
+        <surefire-plugin.version>3.2.5</surefire-plugin.version>
+    </properties>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.13.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${surefire-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-jar-plugin</artifactId>
+                    <version>3.4.1</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+</project>
