@@ -97,7 +97,12 @@ class EndToEndTest {
 
     @Test
     void pageIsTyped() {
-        PageDto<Book> page = api.getBooksResource().findAll(1, 20, null, "FICTION");
+        // 4 query-параметра — бин @BeanParam: заполняются только нужные, пустые в запрос не уходят
+        PageDto<Book> page = api.getBooksResource().findAll(BooksResource.FindAllParams.builder()
+                .page(1)
+                .limit(20)
+                .genre("FICTION")
+                .build());
 
         assertEquals("Мастер и Маргарита", page.getData().get(0).getTitle());
         // total в спеке — number, typeOverrides PageDto.*=Integer в execution e2e делает его Integer
@@ -142,7 +147,8 @@ class EndToEndTest {
     @Test
     void negativeCheckOverridesTypedParameter() {
         api.getBooksResource()
-                .assured(r -> r.setQueryParam("limit", "abc").findAll(1, 20, null, null))
+                .assured(r -> r.setQueryParam("limit", "abc")
+                        .findAll(BooksResource.FindAllParams.builder().page(1).limit(20).build()))
                 .statusCode(400)
                 .body("code", equalTo("VALIDATION_FAILED"));
 

@@ -7,5 +7,6 @@ import com.squareup.javapoet.TypeName;
  */
 public record ParamModel(In in, String paramName, String varName, TypeName typeName) {
 
-    public enum In { PATH, QUERY, HEADER, BODY }
+    /** BEAN — бин @BeanParam, в который ушли query-параметры ручки (typeName — вложенный класс интерфейса). */
+    public enum In { PATH, QUERY, HEADER, BEAN, BODY }
 }

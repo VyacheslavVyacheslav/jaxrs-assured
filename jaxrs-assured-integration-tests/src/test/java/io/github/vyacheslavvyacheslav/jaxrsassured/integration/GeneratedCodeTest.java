@@ -41,6 +41,7 @@ import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.r
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.stores.StoreBooksResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.stores.StoreResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.stores.StoresResource;
+import jakarta.ws.rs.BeanParam;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.Path;
@@ -85,8 +86,14 @@ class GeneratedCodeTest {
 
     @Test
     void booksFollowSpec() throws Exception {
-        Method findAll = BooksResource.class.getMethod("findAll", Number.class, Number.class, Number.class, String.class);
-        assertEquals(List.of("query:page", "query:limit", "query:authorId", "query:genre"), params(findAll));
+        // 4 query-параметра — больше порога 3: бин @BeanParam, вложенный класс FindAllParams с билдером
+        Method findAll = BooksResource.class.getMethod("findAll", BooksResource.FindAllParams.class);
+        assertNotNull(findAll.getParameters()[0].getAnnotation(BeanParam.class));
+        assertEquals(List.of("query:page", "query:limit", "query:authorId", "query:genre"),
+                queryFields(BooksResource.FindAllParams.class));
+        assertEquals(Number.class, BooksResource.FindAllParams.class.getDeclaredField("page").getType());
+        assertEquals("BooksResource.FindAllParams(page=1, limit=null, authorId=null, genre=FICTION)",
+                BooksResource.FindAllParams.builder().page(1).genre("FICTION").build().toString());
         assertEquals(BASE + ".model.PageDto<" + BASE + ".model.Book>", findAll.getGenericReturnType().getTypeName());
 
         // лист {id} инлайнится в BooksResource; number без format в параметре — Number: и целое, и дробное
@@ -257,6 +264,14 @@ class GeneratedCodeTest {
     /** Параметры метода как «где:имя» по аннотациям JAX-RS. */
     private static List<String> params(Method method) {
         return Arrays.stream(method.getParameters()).map(GeneratedCodeTest::param).toList();
+    }
+
+    /** Поля бина @BeanParam с @QueryParam — в порядке объявления. */
+    private static List<String> queryFields(Class<?> bean) {
+        return Arrays.stream(bean.getDeclaredFields())
+                .filter(field -> field.isAnnotationPresent(QueryParam.class))
+                .map(field -> "query:" + field.getAnnotation(QueryParam.class).value())
+                .toList();
     }
 
     private static String param(Parameter parameter) {

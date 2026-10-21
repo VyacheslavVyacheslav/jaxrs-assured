@@ -21,12 +21,17 @@ import java.util.stream.Collectors;
  * (Authorization — BearerAuthFilter) или setHeader. Имена без учета регистра, как в HTTP.
  * typeOverrides — переопределения типов числовых полей DTO ({@code *.id=Long}, см. TypeOverrideRule); порядок важен:
  * из совпавших правил действует последнее.
+ * beanParamThreshold — у ручки с query-параметрами больше этого числа они уходят в бин @BeanParam
+ * (вложенный класс интерфейса); 0 — никогда.
  */
 public record GenConfig(Path specFile, Path outDir, String basePackage, String rootPath,
                         String rootClassName, List<Pattern> ignorePaths, String superInterface,
                         Map<String, String> importMappings, boolean lombok, boolean splitModel,
                         Map<String, String> modelPackages, Set<String> ignoreHeaders,
-                        List<TypeOverrideRule> typeOverrides) {
+                        List<TypeOverrideRule> typeOverrides, int beanParamThreshold) {
+
+    /** Больше трёх query-параметров — бин: длинный список позиционных null читать и поддерживать тяжело. */
+    public static final int DEFAULT_BEAN_PARAM_THRESHOLD = 3;
 
     public GenConfig {
         ignorePaths = List.copyOf(ignorePaths);
@@ -34,6 +39,18 @@ public record GenConfig(Path specFile, Path outDir, String basePackage, String r
         modelPackages = Map.copyOf(modelPackages);
         ignoreHeaders = ignoreHeaders.stream().map(GenConfig::headerKey).collect(Collectors.toUnmodifiableSet());
         typeOverrides = List.copyOf(typeOverrides);
+        if (beanParamThreshold < 0) {
+            throw new IllegalArgumentException("beanParamThreshold не может быть отрицательным: " + beanParamThreshold);
+        }
+    }
+
+    /** Порог бина query-параметров — по умолчанию. */
+    public GenConfig(Path specFile, Path outDir, String basePackage, String rootPath, String rootClassName,
+                     List<Pattern> ignorePaths, String superInterface, Map<String, String> importMappings,
+                     boolean lombok, boolean splitModel, Map<String, String> modelPackages, Set<String> ignoreHeaders,
+                     List<TypeOverrideRule> typeOverrides) {
+        this(specFile, outDir, basePackage, rootPath, rootClassName, ignorePaths, superInterface, importMappings,
+                lombok, splitModel, modelPackages, ignoreHeaders, typeOverrides, DEFAULT_BEAN_PARAM_THRESHOLD);
     }
 
     /** Без переопределения типов. */

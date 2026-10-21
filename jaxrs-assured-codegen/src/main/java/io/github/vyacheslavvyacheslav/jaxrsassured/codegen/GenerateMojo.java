@@ -88,6 +88,13 @@ public class GenerateMojo extends AbstractMojo {
     @Parameter
     List<String> typeOverrides;
 
+    /**
+     * Query-параметров у ручки больше этого числа — они уходят в бин @BeanParam, вложенный класс
+     * {@code <Метод>Params} с билдером (флаг --bean-param-threshold); 0 — никогда.
+     */
+    @Parameter(property = "jaxrsassured.beanParamThreshold", defaultValue = "3")
+    int beanParamThreshold = GenConfig.DEFAULT_BEAN_PARAM_THRESHOLD;
+
     /** Схема → внешний класс, схема не генерируется (флаг --import): {@code <PageDto>com.example.Page</PageDto>}. */
     @Parameter
     Map<String, String> importMappings;
@@ -165,6 +172,9 @@ public class GenerateMojo extends AbstractMojo {
             }
             headers.add(name);
         }
+        if (beanParamThreshold < 0) {
+            throw new MojoExecutionException("codegen: beanParamThreshold не может быть отрицательным: " + beanParamThreshold);
+        }
         List<TypeOverrideRule> overrides = new ArrayList<>();
         for (String rule : typeOverrides == null ? List.<String>of() : typeOverrides) {
             try {
@@ -197,6 +207,6 @@ public class GenerateMojo extends AbstractMojo {
             throw new MojoExecutionException("codegen: modelPackages работает только вместе со splitModel");
         }
         return new GenConfig(spec.toPath(), outputDirectory.toPath(), basePackage, rootPath, rootName,
-                ignore, superInterface, mappings, lombok, splitModel, pins, headers, overrides);
+                ignore, superInterface, mappings, lombok, splitModel, pins, headers, overrides, beanParamThreshold);
     }
 }

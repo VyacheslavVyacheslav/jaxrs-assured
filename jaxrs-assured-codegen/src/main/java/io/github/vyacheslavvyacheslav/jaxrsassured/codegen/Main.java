@@ -17,7 +17,7 @@ import java.util.regex.PatternSyntaxException;
  *     <li>{@code Main <spec>} — печать дерева путей (проверка парсинга и группировки);</li>
  *     <li>{@code Main <spec> <outDir> <basePackage> [--root api/v1] [--root-name V1Resource]
  *         [--ignore <regex>]... [--ignore-header имя]... [--super-interface полный.Класс]
- *         [--import Схема=полный.класс]... [--type-override Схема.поле=Тип]... [--lombok]
+ *         [--import Схема=полный.класс]... [--type-override Схема.поле=Тип]... [--bean-param-threshold N] [--lombok]
  *         [--split-model [--model-package Схема=группа]...]}
  *         — генерация исходников;</li>
  *     <li>{@code Main --help} — справка.</li>
@@ -45,6 +45,9 @@ public final class Main {
               --type-override Схема.поле=Тип   тип числового поля DTO: Integer, Long, Double, BigDecimal;
                                                * — любые символы: *.id=Long, PageDto.*=Integer; из совпавших
                                                действует последнее (повторяемый)
+              --bean-param-threshold <N>       query-параметров у ручки больше N — они уходят в бин @BeanParam
+                                               (вложенный класс <Метод>Params с билдером); 0 — никогда
+                                               (по умолчанию 3)
               --lombok                         DTO на аннотациях Lombok (API тот же; Lombok нужен проекту)
               --split-model                    DTO по подпакетам групп путей: model.<группа>, как resources;
                                                общие для нескольких групп — в корне model
@@ -111,6 +114,7 @@ public final class Main {
         List<Pattern> ignore = new ArrayList<>();
         Set<String> ignoreHeaders = new LinkedHashSet<>();
         List<TypeOverrideRule> typeOverrides = new ArrayList<>();
+        int beanParamThreshold = GenConfig.DEFAULT_BEAN_PARAM_THRESHOLD;
         Map<String, String> importMappings = new LinkedHashMap<>();
         Map<String, String> modelPackages = new LinkedHashMap<>();
         for (int i = 3; i < args.length; i++) {
@@ -138,6 +142,13 @@ public final class Main {
                         throw new CliException("--type-override: " + e.getMessage());
                     }
                 }
+                case "--bean-param-threshold" -> {
+                    String value = value(args, ++i, "--bean-param-threshold");
+                    if (!value.matches("\\d{1,4}")) {
+                        throw new CliException("Ожидалось целое ≥ 0 в --bean-param-threshold: " + value);
+                    }
+                    beanParamThreshold = Integer.parseInt(value);
+                }
                 case "--lombok" -> lombok = true;
                 case "--split-model" -> splitModel = true;
                 case "--model-package" -> {
@@ -162,7 +173,7 @@ public final class Main {
         }
         GenConfig config = new GenConfig(specFile, outDir, basePackage, rootPath, rootClassName,
                 ignore, superInterface, importMappings, lombok, splitModel, modelPackages, ignoreHeaders,
-                typeOverrides);
+                typeOverrides, beanParamThreshold);
         Generator.GenerationResult result = Generator.run(config);
         out.printf("Сгенерировано интерфейсов: %d, DTO: %d → %s%n",
                 result.interfaces(), result.dtos(), outDir);

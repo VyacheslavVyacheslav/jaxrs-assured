@@ -30,12 +30,12 @@ interface DtoStyle {
 
     /** Тип самого DTO: X или X&lt;T&gt; у дженерик-обёртки. */
     static TypeName selfType(DtoModel model) {
-        return parameterized(ClassName.get(model.packageName(), model.className()), model);
+        return parameterized(model.selfClass(), model);
     }
 
     /** Класс билдера — XBuilder, как у Lombok @Builder. */
     static ClassName builderClass(DtoModel model) {
-        return ClassName.get(model.packageName(), model.className(), model.className() + "Builder");
+        return model.selfClass().nestedClass(model.className() + "Builder");
     }
 
     static TypeName parameterized(ClassName raw, DtoModel model) {

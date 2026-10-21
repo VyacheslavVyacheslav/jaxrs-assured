@@ -29,7 +29,11 @@ class GenerateMojoTest {
               "info": {"title": "t", "version": "1.0"},
               "paths": {
                 "/api/v1/drivers": {"get": {"operationId": "DriversController_findAll",
-                    "parameters": [{"name": "X-Actor", "in": "header", "schema": {"type": "string"}}],
+                    "parameters": [{"name": "X-Actor", "in": "header", "schema": {"type": "string"}},
+                        {"name": "page", "in": "query", "schema": {"type": "number"}},
+                        {"name": "limit", "in": "query", "schema": {"type": "number"}},
+                        {"name": "sort", "in": "query", "schema": {"type": "string"}},
+                        {"name": "name", "in": "query", "schema": {"type": "string"}}],
                     "responses": {"200": {"description": "ok"}}}},
                 "/metrics": {"get": {"operationId": "MetricsController_get",
                     "responses": {"200": {"description": "ok"}}}}
@@ -122,6 +126,19 @@ class GenerateMojoTest {
     }
 
     @Test
+    void beanParamThresholdReachesGenerator() throws Exception {
+        GenerateMojo mojo = mojo();
+        Path drivers = mojo.outputDirectory.toPath().resolve("gen/test/resources/drivers/DriversResource.java");
+
+        mojo.execute();
+        assertTrue(Files.readString(drivers).contains("@BeanParam"), "4 query-параметра — бин по умолчанию");
+
+        mojo.beanParamThreshold = 0;
+        mojo.execute();
+        assertFalse(Files.readString(drivers).contains("@BeanParam"));
+    }
+
+    @Test
     void splitModelAndPins() throws Exception {
         GenerateMojo mojo = mojo();
         mojo.splitModel = true;
@@ -157,6 +174,10 @@ class GenerateMojoTest {
         GenerateMojo badHeader = mojo();
         badHeader.ignoreHeaders = List.of("X Actor");
         assertThrows(MojoExecutionException.class, badHeader::execute);
+
+        GenerateMojo badThreshold = mojo();
+        badThreshold.beanParamThreshold = -1;
+        assertThrows(MojoExecutionException.class, badThreshold::execute);
 
         GenerateMojo badOverride = mojo();
         badOverride.typeOverrides = List.of("DriverDto.rating");

@@ -90,9 +90,14 @@ final class PlainDtoStyle implements DtoStyle {
                 .build();
     }
 
-    /** Формат Lombok @ToString: X(a=1, b=null) — вывод не зависит от стиля. */
+    /**
+     * Формат Lombok @ToString: X(a=1, b=null), у вложенного — Внешний.X(...), как пишет Lombok;
+     * вывод не зависит от стиля.
+     */
     private MethodSpec toStringMethod(DtoModel model) {
-        CodeBlock.Builder body = CodeBlock.builder().add("return $S", model.className() + "(");
+        String typeName = model.enclosingClass() == null ? model.className()
+                : model.enclosingClass() + "." + model.className();
+        CodeBlock.Builder body = CodeBlock.builder().add("return $S", typeName + "(");
         for (int i = 0; i < model.fields().size(); i++) {
             String name = model.fields().get(i).varName();
             body.add("\n+ $S + $N", (i == 0 ? "" : ", ") + name + "=", name);
@@ -163,7 +168,7 @@ final class PlainDtoStyle implements DtoStyle {
 
     /** X или X&lt;?&gt; — для приведения в equals. */
     private TypeName wildcardSelf(DtoModel model) {
-        ClassName raw = ClassName.get(model.packageName(), model.className());
+        ClassName raw = model.selfClass();
         if (model.typeVariables().isEmpty()) {
             return raw;
         }

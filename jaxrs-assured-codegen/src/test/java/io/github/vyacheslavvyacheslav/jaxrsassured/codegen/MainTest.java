@@ -160,6 +160,46 @@ class MainTest {
     }
 
     @Test
+    void badBeanParamThresholdIsUsageError() throws Exception {
+        String spec = writeSpec("spec.json", SPEC);
+        String outDir = tempDir.resolve("out").toString();
+        assertEquals(2, run(spec, outDir, "gen.test", "--bean-param-threshold", "-1").code());
+        assertEquals(2, run(spec, outDir, "gen.test", "--bean-param-threshold", "три").code());
+    }
+
+    @Test
+    void manyQueryParamsGoToBeanParamUnlessThresholdIsZero() throws Exception {
+        String spec = writeSpec("spec-query.json", """
+                {
+                  "openapi": "3.0.0",
+                  "info": {"title": "t", "version": "1.0"},
+                  "paths": {
+                    "/api/v1/vehicles": {"get": {"operationId": "VehiclesController_findAll",
+                        "parameters": [
+                          {"name": "a", "in": "query", "schema": {"type": "string"}},
+                          {"name": "b", "in": "query", "schema": {"type": "string"}},
+                          {"name": "c", "in": "query", "schema": {"type": "string"}},
+                          {"name": "d", "in": "query", "schema": {"type": "number"}}
+                        ],
+                        "responses": {"200": {"description": "ok"}}}}
+                  }
+                }
+                """);
+        Path beans = tempDir.resolve("beans");
+        Path positional = tempDir.resolve("positional");
+
+        assertEquals(0, run(spec, beans.toString(), "gen.test").code());
+        assertEquals(0, run(spec, positional.toString(), "gen.test", "--bean-param-threshold", "0").code());
+
+        String vehicles = "gen/test/resources/vehicles/VehiclesResource.java";
+        String withBean = Files.readString(beans.resolve(vehicles));
+        assertTrue(withBean.contains("findAll(@BeanParam FindAllParams params)"), withBean);
+        assertTrue(withBean.contains("class FindAllParams"), withBean);
+        assertTrue(withBean.contains("@QueryParam(\"d\")"), withBean);
+        assertFalse(Files.readString(positional.resolve(vehicles)).contains("@BeanParam"));
+    }
+
+    @Test
     void blankOrMalformedBasePackageIsUsageError() throws Exception {
         String spec = writeSpec("spec.json", SPEC);
         String outDir = tempDir.resolve("out").toString();

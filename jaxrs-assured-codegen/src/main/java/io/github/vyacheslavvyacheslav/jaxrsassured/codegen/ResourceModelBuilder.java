@@ -35,6 +35,7 @@ import java.util.Set;
  *     <li>имя метода — operationId без префикса контроллера ("XxxController_findOne" → findOne),
  *         при коллизии в интерфейсе — полный operationId;</li>
  *     <li>встроенный enum параметра (и массив таких) — вложенный энум интерфейса: status → Resource.Status;</li>
+ *     <li>query-параметров больше beanParamThreshold — бин @BeanParam, вложенный класс &lt;Метод&gt;Params;</li>
  *     <li>header-параметры из ignoreHeaders (без учета регистра) не становятся параметрами метода —
  *         их ставят фильтры клиента или setHeader;</li>
  *     <li>тело — параметр-DTO и @Consumes; необязательное тело (requestBody.required false или не указан —
@@ -83,7 +84,7 @@ final class ResourceModelBuilder {
         }
 
         models.add(0, new ResourceModel(config.basePackage(), config.rootClassName(),
-                config.rootPath(), List.of(), rootLocators, List.of()));
+                config.rootPath(), List.of(), rootLocators, List.of(), List.of()));
         config.ignoreHeaders().stream()
                 .filter(header -> !matchedIgnoredHeaders.contains(header))
                 .sorted()
@@ -129,15 +130,15 @@ final class ResourceModelBuilder {
         register(packageName, className, node.fullPath());
 
         Set<String> usedNames = new HashSet<>();
-        NestedEnums enums = new NestedEnums(packageName, className);
-        List<OperationModel> operations = new ArrayList<>(operationsOf(node, null, usedNames, enums));
+        NestedTypes nested = new NestedTypes(packageName, className);
+        List<OperationModel> operations = new ArrayList<>(operationsOf(node, null, usedNames, nested));
         List<LocatorModel> locators = new ArrayList<>();
         String childrenBase = groupRoot ? Naming.pascal(Naming.singular(node.name())) : ownBase;
 
         for (PathTree.Node child : node.children().values()) {
             boolean childIsParam = child.name().startsWith("{");
             if (childIsParam && child.childrenCount() == 0) {
-                operations.addAll(operationsOf(child, child.name(), usedNames, enums));
+                operations.addAll(operationsOf(child, child.name(), usedNames, nested));
                 continue;
             }
             String childBase = childIsParam
@@ -152,7 +153,8 @@ final class ResourceModelBuilder {
                     childIsParam ? locatorParamType(child, pathParam) : null,
                     childModel.packageName(), childModel.className()));
         }
-        ResourceModel model = new ResourceModel(packageName, className, null, operations, locators, enums.models());
+        ResourceModel model = new ResourceModel(packageName, className, null, operations, locators,
+                nested.enums(), nested.beans());
         models.add(model);
         return model;
     }
@@ -231,7 +233,7 @@ final class ResourceModelBuilder {
 
     /** Ручки узла; с inlinePath ({param}-лист) ручки уходят в родителя с @Path("{param}"). */
     private List<OperationModel> operationsOf(PathTree.Node node, String inlinePath, Set<String> usedNames,
-                                              NestedEnums enums) {
+                                              NestedTypes nested) {
         if (node.item() == null) {
             return List.of();
         }
@@ -245,7 +247,8 @@ final class ResourceModelBuilder {
             }
             // имя метода — до параметров: с ним различаются вложенные энумы одноимённых параметров
             String methodName = methodName(operation, http, node, usedNames);
-            List<ParamModel> params = paramsOf(operation, inlinePath, node, methodName, enums);
+            List<ParamModel> params = withBeanParam(paramsOf(operation, inlinePath, node, methodName, nested),
+                    methodName, nested);
             List<ParamModel> withoutBody = uniqueVarNames(params);
             String mediaType = consumes(operation);
             if (mediaType != null) {
@@ -290,7 +293,7 @@ final class ResourceModelBuilder {
     }
 
     private List<ParamModel> paramsOf(Operation operation, String inlinePath, PathTree.Node node, String methodName,
-                                      NestedEnums enums) {
+                                      NestedTypes nested) {
         List<ParamModel> params = new ArrayList<>();
         if (operation.getParameters() == null) {
             return params;
@@ -300,19 +303,19 @@ final class ResourceModelBuilder {
                 case "path" -> {
                     if (inlinePath != null) {
                         params.add(new ParamModel(ParamModel.In.PATH, parameter.getName(),
-                                Naming.parameter(parameter.getName()), paramType(parameter, methodName, enums)));
+                                Naming.parameter(parameter.getName()), paramType(parameter, methodName, nested)));
                     }
                     // без инлайна параметр пути уже съеден локаторами родителей
                 }
                 case "query" -> params.add(new ParamModel(ParamModel.In.QUERY, parameter.getName(),
-                        Naming.parameter(parameter.getName()), paramType(parameter, methodName, enums)));
+                        Naming.parameter(parameter.getName()), paramType(parameter, methodName, nested)));
                 case "header" -> {
                     if (config.ignoredHeader(parameter.getName())) {
                         // заголовок ставит фильтр клиента или setHeader — параметром метода не нужен
                         matchedIgnoredHeaders.add(GenConfig.headerKey(parameter.getName()));
                     } else {
                         params.add(new ParamModel(ParamModel.In.HEADER, parameter.getName(),
-                                Naming.parameter(parameter.getName()), paramType(parameter, methodName, enums)));
+                                Naming.parameter(parameter.getName()), paramType(parameter, methodName, nested)));
                     }
                 }
                 case "cookie" -> warnings.add("Cookie-параметр пропущен: " + parameter.getName()
@@ -328,14 +331,14 @@ final class ResourceModelBuilder {
      * Тип параметра ручки: встроенный enum (и массив таких) — вложенный энум интерфейса, как у свойств DTO;
      * остальное — как решает SchemaTypes.
      */
-    private TypeName paramType(Parameter parameter, String methodName, NestedEnums enums) {
+    private TypeName paramType(Parameter parameter, String methodName, NestedTypes nested) {
         Schema<?> schema = parameter.getSchema();
         if (isInlineEnum(schema)) {
-            return enums.enumFor(parameter.getName(), methodName, schema.getEnum());
+            return nested.enumFor(parameter.getName(), methodName, schema.getEnum());
         }
         if (schema != null && "array".equals(schema.getType()) && isInlineEnum(schema.getItems())) {
             return ParameterizedTypeName.get(ClassName.get(List.class),
-                    enums.enumFor(parameter.getName(), methodName, schema.getItems().getEnum()));
+                    nested.enumFor(parameter.getName(), methodName, schema.getItems().getEnum()));
         }
         return types.paramType(schema);
     }
@@ -345,17 +348,46 @@ final class ResourceModelBuilder {
     }
 
     /**
-     * Вложенные энумы интерфейса из встроенных enum параметров. Имя — Pascal(имя параметра): status → Status.
-     * Те же значения под тем же именем — тот же энум; другие значения — с префиксом метода (UpdateStatus),
-     * дальше — с номером (Status2).
+     * Query-параметров больше порога (beanParamThreshold) — они уходят в бин @BeanParam на месте первого из них;
+     * параметры пути и заголовки остаются в сигнатуре: их мало, и они задают адрес и окружение запроса.
      */
-    private final class NestedEnums {
+    private List<ParamModel> withBeanParam(List<ParamModel> params, String methodName, NestedTypes nested) {
+        List<ParamModel> query = params.stream().filter(p -> p.in() == ParamModel.In.QUERY).toList();
+        int threshold = config.beanParamThreshold();
+        if (threshold == 0 || query.size() <= threshold) {
+            return params;
+        }
+        ClassName bean = nested.beanFor(methodName, uniqueVarNames(query));
+        List<ParamModel> result = new ArrayList<>();
+        boolean beanAdded = false;
+        for (ParamModel param : params) {
+            if (param.in() != ParamModel.In.QUERY) {
+                result.add(param);
+            } else if (!beanAdded) {
+                result.add(new ParamModel(ParamModel.In.BEAN, "params", "params", bean));
+                beanAdded = true;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Вложенные типы интерфейса.
+     * <ul>
+     *     <li>Энумы встроенных enum параметров. Имя — Pascal(имя параметра): status → Status. Те же значения
+     *         под тем же именем — тот же энум; другие значения — с префиксом метода (UpdateStatus),
+     *         дальше — с номером (Status2).</li>
+     *     <li>Бины @BeanParam query-параметров ручки: &lt;Метод&gt;Params (LocateParams), поля — в порядке спеки.</li>
+     * </ul>
+     */
+    private final class NestedTypes {
 
         private final String packageName;
         private final String className;
         private final Map<String, EnumModel> byName = new LinkedHashMap<>();
+        private final Map<String, DtoModel> beans = new LinkedHashMap<>();
 
-        NestedEnums(String packageName, String className) {
+        NestedTypes(String packageName, String className) {
             this.packageName = packageName;
             this.className = className;
         }
@@ -378,8 +410,26 @@ final class ResourceModelBuilder {
             return ClassName.get(packageName, className, name);
         }
 
-        List<EnumModel> models() {
+        /** Бин query-параметров ручки; поле — имя query-параметра (jsonName) и Java-имя и тип параметра. */
+        ClassName beanFor(String methodName, List<ParamModel> query) {
+            String base = Naming.pascalParam(methodName) + "Params";
+            String name = base;
+            for (int i = 2; beans.containsKey(name) || byName.containsKey(name); i++) {
+                name = base + i;
+            }
+            List<FieldModel> fields = query.stream()
+                    .map(p -> new FieldModel(p.paramName(), p.varName(), p.typeName(), false, null))
+                    .toList();
+            beans.put(name, new DtoModel(packageName, name, null, List.of(), fields, List.of(), null, className));
+            return ClassName.get(packageName, className, name);
+        }
+
+        List<EnumModel> enums() {
             return List.copyOf(byName.values());
+        }
+
+        List<DtoModel> beans() {
+            return List.copyOf(beans.values());
         }
     }
 

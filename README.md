@@ -596,6 +596,7 @@ Main <spec> <outDir> <basePackage> [флаги]      — генерация ис
 | `--super-interface полный.Класс` | `superInterface` | супер-интерфейс ресурсов: `XResource extends Класс<XResource>`; для core — `…core.clients.ConfigurationResource` |
 | `--import Схема=полный.Класс` | `importMappings` (`<Схема>класс</Схема>`) | схему не генерировать, ссылки типировать указанным классом |
 | `--type-override Схема.поле=Тип` | `typeOverrides` (`<typeOverride>`) | тип числового поля DTO: `Integer`, `Long`, `Double`, `BigDecimal`; `*` — любые символы (см. [Типы](#типы)) |
+| `--bean-param-threshold <N>` | `beanParamThreshold` | query-параметров у ручки больше `N` — они уходят в бин `@BeanParam`; по умолчанию `3`, `0` — никогда |
 | `--lombok` | `lombok` | DTO на аннотациях Lombok (см. [Два стиля DTO](#два-стиля-dto)) |
 | `--split-model` | `splitModel` | DTO по подпакетам групп путей (см. [Раскладка model](#раскладка-model-по-пакетам)) |
 | `--model-package Схема=группа` | `modelPackages` (`<Схема>группа</Схема>`) | закрепить пакет схемы при split-model; пустая группа — корень `model` |
@@ -622,6 +623,14 @@ Main <spec> <outDir> <basePackage> [флаги]      — генерация ис
 ```
 
 - `{param}` без детей инлайнится в родителя: `@Path("{id}")` + `@PathParam`.
+- Query-параметров у ручки больше трех (`--bean-param-threshold`) — они уходят в бин `@BeanParam`: вложенный
+  класс интерфейса `<Метод>Params` с билдером, `toBuilder()` и геттерами, как у DTO (с `--lombok` — на Lombok).
+  Вместо `findAll(1, 20, null, "FICTION")` — заполняются только нужные поля, пустые в запрос не уходят:
+  ```java
+  books.findAll(BooksResource.FindAllParams.builder().page(1).genre("FICTION").build());
+  ```
+  Параметры пути и заголовки остаются в сигнатуре; `setQueryParam`/`deleteQueryParam` перекрывают поля бина.
+  Порядок параметров в URL у бина задает RestEasy, а не порядок полей.
 - Header-параметр — `@HeaderParam` у метода. Заголовки, которые в тестах ставит фильтр или `setHeader`
   (`Authorization`, `X-Actor`), лучше перечислить в `--ignore-header`: иначе в каждом вызове придется передавать
   `null`, а токен, переданный и параметром, и через `BearerAuthFilter`, уйдет двумя значениями.

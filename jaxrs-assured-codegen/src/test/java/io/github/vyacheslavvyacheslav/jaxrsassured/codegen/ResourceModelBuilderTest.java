@@ -307,6 +307,83 @@ class ResourceModelBuilderTest {
     }
 
     @Test
+    void moreThanThresholdQueryParamsGoToBeanParam() {
+        OpenAPI spec = beanParamsSpec();
+
+        List<ResourceModel> models = new ResourceModelBuilder(CONFIG, new SchemaTypes(CONFIG, spec))
+                .build(PathTree.of(spec));
+
+        // 4 query-параметра — бин на месте первого из них; путь и заголовок остаются в сигнатуре
+        OperationModel findOne = operation(models, "VehiclesResource", "findOne");
+        assertEquals(List.of("PATH:id", "BEAN:params", "HEADER:X-Trace"), paramKeys(findOne));
+        assertEquals("gen.resources.vehicles.VehiclesResource.FindOneParams", paramType(findOne, "params"));
+        // 3 — не больше порога: позиционные
+        assertEquals(List.of("QUERY:page", "QUERY:limit", "QUERY:sort"),
+                paramKeys(operation(models, "VehiclesResource", "findAll")));
+        // перегрузка без тела — тот же бин
+        List<OperationModel> search = byName(models, "VehicleSearchResource").operations();
+        assertEquals(List.of("BEAN:params", "BODY:body"), paramKeys(search.get(0)));
+        assertEquals(List.of("BEAN:params"), paramKeys(search.get(1)));
+        assertEquals(List.of("SearchParams"),
+                byName(models, "VehicleSearchResource").beanParams().stream().map(DtoModel::className).toList());
+
+        List<DtoModel> beans = byName(models, "VehiclesResource").beanParams();
+        assertEquals(List.of("FindOneParams"), beans.stream().map(DtoModel::className).toList());
+        DtoModel bean = beans.get(0);
+        assertEquals("gen.resources.vehicles.VehiclesResource.FindOneParams", bean.selfClass().toString());
+        assertEquals(List.of("bodyLengthMFrom", "x-region", "tags", "page"),
+                bean.fields().stream().map(FieldModel::jsonName).toList());
+        assertEquals(List.of("java.lang.Number", "java.lang.String", "java.util.List<java.lang.String>",
+                "java.lang.Number"), bean.fields().stream().map(f -> f.type().toString()).toList());
+        assertEquals("xRegion", bean.fields().get(1).varName());
+    }
+
+    @Test
+    void zeroThresholdKeepsQueryParamsPositional() {
+        OpenAPI spec = beanParamsSpec();
+        GenConfig noBeans = new GenConfig(Path.of("spec.json"), Path.of("out"), "gen", "api/v1", "V1Resource",
+                List.of(), null, Map.of(), false, false, Map.of(), Set.of(), List.of(), 0);
+
+        List<ResourceModel> models = new ResourceModelBuilder(noBeans, new SchemaTypes(noBeans, spec))
+                .build(PathTree.of(spec));
+
+        assertEquals(List.of("PATH:id", "QUERY:bodyLengthMFrom", "QUERY:x-region", "QUERY:tags", "QUERY:page",
+                "HEADER:X-Trace"), paramKeys(operation(models, "VehiclesResource", "findOne")));
+        assertEquals(List.of(), byName(models, "VehiclesResource").beanParams());
+    }
+
+    /** GET /vehicles — 3 query; GET /vehicles/{id} — путь, 4 query, заголовок; POST /vehicles/search — 4 query и необязательное тело. */
+    private static OpenAPI beanParamsSpec() {
+        Content anyJson = new Content().addMediaType("application/json",
+                new MediaType().schema(new ObjectSchema().additionalProperties(true)));
+        return new OpenAPI().paths(new Paths()
+                .addPathItem("/api/v1/vehicles", new PathItem().get(new Operation()
+                        .operationId("VehiclesController_findAll")
+                        .addParametersItem(new Parameter().name("page").in("query").schema(new NumberSchema()))
+                        .addParametersItem(new Parameter().name("limit").in("query").schema(new NumberSchema()))
+                        .addParametersItem(new Parameter().name("sort").in("query").schema(new StringSchema()))
+                        .responses(responses200())))
+                .addPathItem("/api/v1/vehicles/{id}", new PathItem().get(new Operation()
+                        .operationId("VehiclesController_findOne")
+                        .addParametersItem(pathParam("id", new StringSchema()))
+                        .addParametersItem(new Parameter().name("bodyLengthMFrom").in("query").schema(new NumberSchema()))
+                        .addParametersItem(new Parameter().name("x-region").in("query").schema(new StringSchema()))
+                        .addParametersItem(new Parameter().name("tags").in("query").schema(
+                                new ArraySchema().items(new StringSchema())))
+                        .addParametersItem(new Parameter().name("page").in("query").schema(new NumberSchema()))
+                        .addParametersItem(new Parameter().name("X-Trace").in("header").schema(new StringSchema()))
+                        .responses(responses200())))
+                .addPathItem("/api/v1/vehicles/search", new PathItem().post(new Operation()
+                        .operationId("VehiclesController_search")
+                        .addParametersItem(new Parameter().name("a").in("query").schema(new StringSchema()))
+                        .addParametersItem(new Parameter().name("b").in("query").schema(new StringSchema()))
+                        .addParametersItem(new Parameter().name("c").in("query").schema(new StringSchema()))
+                        .addParametersItem(new Parameter().name("d").in("query").schema(new StringSchema()))
+                        .requestBody(new RequestBody().required(false).content(anyJson))
+                        .responses(responses200()))));
+    }
+
+    @Test
     void pathsOutsideRootAreRejected() {
         OpenAPI spec = new OpenAPI().paths(new Paths()
                 .addPathItem("/api/v1/drivers", new PathItem().get(new Operation().operationId("list")))
