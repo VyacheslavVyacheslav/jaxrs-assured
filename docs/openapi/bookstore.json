@@ -288,6 +288,18 @@
           }
         }
       }
+    },
+    "/api/v1/stores/{id}/books": {
+      "get": {
+        "operationId": "StoreBooksController_findAll",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "description": "Номер магазина: {id} с детьми — локатор, number — Integer", "schema": {"type": "number"}},
+          {"name": "format", "in": "query", "required": false, "schema": {"$ref": "#/components/schemas/BookFormat"}}
+        ],
+        "responses": {
+          "200": {"description": "Книги в наличии", "content": {"application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/Book"}}}}}
+        }
+      }
     }
   },
   "components": {

@@ -35,6 +35,9 @@ import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.g
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.orders.OrderReceiptResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.reports.ReportArchivesResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.reports.ReportFileResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.stores.StoreBooksResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.stores.StoreResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.stores.StoresResource;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.Path;
@@ -119,6 +122,11 @@ class GeneratedCodeTest {
         assertEquals(AuthorIdResource.class,
                 AuthorsResource.class.getMethod("getAuthorIdResource", String.class).getReturnType());
         assertEquals(AuthorIdBooksResource.class, AuthorIdResource.class.getMethod("getBooksResource").getReturnType());
+
+        // тип параметра локатора — из ручек поддерева: number без format — Integer, как у инлайнового findOne
+        Method store = StoresResource.class.getMethod("getStoreResource", Integer.class);
+        assertEquals(List.of("path:id"), params(store));
+        assertEquals(StoreBooksResource.class, StoreResource.class.getMethod("getBooksResource").getReturnType());
 
         // лист {code} — не {id}, но тоже инлайнится
         assertEquals("{code}", GiftCardsResource.class.getMethod("findOne", String.class).getAnnotation(Path.class).value());

@@ -126,7 +126,7 @@ final class ResourceWriter {
                 .addAnnotation(AnnotationSpec.builder(Path.class)
                         .addMember("value", "$S", locator.path()).build());
         if (locator.pathParam() != null) {
-            method.addParameter(ParameterSpec.builder(ClassName.get(String.class), Naming.parameter(locator.pathParam()))
+            method.addParameter(ParameterSpec.builder(locator.pathParamType(), Naming.parameter(locator.pathParam()))
                     .addAnnotation(AnnotationSpec.builder(PathParam.class)
                             .addMember("value", "$S", locator.pathParam()).build())
                     .build());

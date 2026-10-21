@@ -7,6 +7,7 @@ import io.swagger.v3.oas.models.Paths;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.media.Content;
 import io.swagger.v3.oas.models.media.MediaType;
+import io.swagger.v3.oas.models.media.NumberSchema;
 import io.swagger.v3.oas.models.media.ObjectSchema;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.media.StringSchema;
@@ -75,6 +76,7 @@ class ResourceModelBuilderTest {
         LocatorModel driverLocator = locator(drivers, "getDriverResource");
         assertEquals("{id}", driverLocator.path());
         assertEquals("id", driverLocator.pathParam());
+        assertEquals("java.lang.String", driverLocator.pathParamType().toString(), "Ни одна ручка не объявила id");
         assertEquals("DriverResource", driverLocator.childClass());
 
         ResourceModel driver = byName(models, "DriverResource");
@@ -122,6 +124,67 @@ class ResourceModelBuilderTest {
         byName(models, "LocationGatesScheduleResource");
         byName(models, "LocationIdResource");
         byName(models, "LocationIdSettingsResource");
+    }
+
+    @Test
+    void locatorParamTakesTypeFromSubtreeOperations() {
+        OpenAPI spec = new OpenAPI()
+                .components(new Components().addSchemas("BookFormat",
+                        new StringSchema()._enum(List.of("e_book", "paperback"))))
+                .paths(new Paths()
+                        // {id} с ручкой и ребёнком: тип из обеих ручек
+                        .addPathItem("/api/v1/books/{id}", new PathItem().get(new Operation()
+                                .operationId("BooksController_findOne")
+                                .addParametersItem(pathParam("id", new NumberSchema()))
+                                .responses(responses200())))
+                        .addPathItem("/api/v1/books/{id}/cover", new PathItem().get(new Operation()
+                                .operationId("BooksController_cover")
+                                .addParametersItem(pathParam("id", new NumberSchema()))
+                                .responses(responses200())))
+                        // $ref на энум
+                        .addPathItem("/api/v1/formats/{format}/books", new PathItem().get(new Operation()
+                                .operationId("FormatsController_books")
+                                .addParametersItem(pathParam("format",
+                                        new Schema<>().$ref("#/components/schemas/BookFormat")))
+                                .responses(responses200())))
+                        // параметр объявлен на пути, а не на ручке
+                        .addPathItem("/api/v1/shelves/{shelfId}/books", new PathItem()
+                                .addParametersItem(pathParam("shelfId", new IntegerSchema().format("int64")))
+                                .get(new Operation().operationId("ShelvesController_books").responses(responses200()))));
+
+        ResourceModelBuilder builder = new ResourceModelBuilder(CONFIG, new SchemaTypes(CONFIG, spec));
+        List<ResourceModel> models = builder.build(PathTree.of(spec));
+
+        assertEquals("java.lang.Integer",
+                locator(byName(models, "BooksResource"), "getBookResource").pathParamType().toString());
+        assertEquals("gen.model.BookFormat",
+                locator(byName(models, "FormatsResource"), "getFormatResource").pathParamType().toString());
+        assertEquals("java.lang.Long",
+                locator(byName(models, "ShelvesResource"), "getShelfIdResource").pathParamType().toString());
+        assertEquals(List.of(), builder.warnings());
+    }
+
+    @Test
+    void locatorParamFallsBackToStringWhenOperationsDisagree() {
+        OpenAPI spec = new OpenAPI().paths(new Paths()
+                .addPathItem("/api/v1/orders/{id}", new PathItem().get(new Operation()
+                        .operationId("OrdersController_findOne")
+                        .addParametersItem(pathParam("id", new NumberSchema()))
+                        .responses(responses200())))
+                .addPathItem("/api/v1/orders/{id}/receipt", new PathItem().get(new Operation()
+                        .operationId("OrdersController_receipt")
+                        .addParametersItem(pathParam("id", new StringSchema()))
+                        .responses(responses200()))));
+
+        ResourceModelBuilder builder = new ResourceModelBuilder(CONFIG, new SchemaTypes(CONFIG, spec));
+        List<ResourceModel> models = builder.build(PathTree.of(spec));
+
+        assertEquals("java.lang.String",
+                locator(byName(models, "OrdersResource"), "getOrderResource").pathParamType().toString());
+        assertTrue(builder.warnings().stream().anyMatch(w -> w.contains("{id}")
+                        && w.contains("Integer: GET /api/v1/orders/{id}")
+                        && w.contains("String: GET /api/v1/orders/{id}/receipt")),
+                builder.warnings().toString());
     }
 
     @Test
@@ -290,6 +353,10 @@ class ResourceModelBuilderTest {
                         .requestBody(new RequestBody().content(new Content().addMediaType("application/json",
                                 new MediaType().schema(new Schema<>().$ref("#/components/schemas/SyncDriversDto")))))
                         .responses(new ApiResponses().addApiResponse("202", new ApiResponse())))));
+    }
+
+    private static Parameter pathParam(String name, Schema<?> schema) {
+        return new Parameter().name(name).in("path").required(true).schema(schema);
     }
 
     private static ApiResponses responses200() {

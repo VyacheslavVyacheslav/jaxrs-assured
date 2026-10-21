@@ -301,6 +301,9 @@ Main <spec> <outDir> <basePackage> [флаги]      — генерация ис
 ```
 
 - `{param}` без детей инлайнится в родителя: `@Path("{id}")` + `@PathParam`.
+- `{param}` с детьми — свой интерфейс за локатором: `StoreResource getStoreResource(@PathParam("id") Integer id)`.
+  Тип параметра локатора берётся из ручек поддерева по тем же правилам, что у параметров ручек (`number` → `Integer`,
+  `$ref` на энум → энум). Если ручки объявили его по-разному — `String` и WARN со списком расхождений.
 - Имя метода — operationId без префикса контроллера (`BooksController_findOne` → `findOne`).
 - Имя java-параметра сохраняет горбы (`X-Request-Id` → `xRequestId`); совпавшие в методе имена разводятся
   суффиксом: header `last-event-id` + query `lastEventId` → `lastEventId`, `lastEventIdQuery`.
@@ -327,12 +330,12 @@ SSE-вызов возвращается сразу, события читают�
 | `string` (включая date-time) | `String` |
 | `integer` / `int64` | `Integer` / `Long` |
 | `number` без format, `double`, `float` | `Double` — дробь не теряется |
-| `number` в query/path/header-параметре | `Integer` — в URL уходит через `toString()`, `Double` дал бы `?limit=20.0` |
+| `number` в query/path/header-параметре и у локатора | `Integer` — в URL уходит через `toString()`, `Double` дал бы `?limit=20.0` |
 | `boolean` | `Boolean` |
 | `array` | `List<тип items>` |
 | `$ref` на схему; `allOf [$ref X]` без своих свойств (ссылка с `description`/`nullable`) | DTO `X` |
 | энум (`enum` схемы или свойства) | Java-энум: константы `E_BOOK`, исходное значение `e_book` — в JSON (`@JsonValue`/`@JsonCreator`) и в URL (`toString()`) |
-| `$ref` на энум в query/path/header-параметре | тот же энум; в URL уходит значение из спеки: `format=e_book`, а не `E_BOOK` |
+| `$ref` на энум в query/path/header-параметре и у локатора | тот же энум; в URL уходит значение из спеки: `format=e_book`, а не `E_BOOK` |
 | `allOf [$ref PageDto, {data: array of $ref X}]` в ответе | `PageDto<X>` |
 | `object` без свойств, `anyOf`/`oneOf`, наследование через `allOf` | `JsonNode` (+ WARN) |
 

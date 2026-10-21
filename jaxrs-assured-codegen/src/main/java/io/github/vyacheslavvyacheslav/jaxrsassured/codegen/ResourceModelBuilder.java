@@ -12,6 +12,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -28,6 +29,7 @@ import java.util.Set;
  *         сегмент-параметр {id} → Pascal(singular(родительского сегмента)); прочие параметры ({locationId})
  *         → Pascal(параметра) — у узла бывает несколько параметризованных потомков;</li>
  *     <li>{param} без детей — ручки инлайнятся в родительский интерфейс с @Path("{param}");</li>
+ *     <li>{param} с детьми — локатор с @PathParam; тип — общий для ручек поддерева, при расхождении String;</li>
  *     <li>имя метода — operationId без префикса контроллера ("XxxController_findOne" → findOne),
  *         при коллизии в интерфейсе — полный operationId;</li>
  *     <li>ответ — первый media type минимального 2xx: text/event-stream → InputStream (поток не кончается,
@@ -39,6 +41,7 @@ final class ResourceModelBuilder {
 
     private static final Set<String> SUPPORTED_HTTP = Set.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS");
     private static final TypeName INPUT_STREAM = ClassName.get(InputStream.class);
+    private static final TypeName STRING = ClassName.get(String.class);
 
     private final GenConfig config;
     private final SchemaTypes types;
@@ -63,7 +66,7 @@ final class ResourceModelBuilder {
         for (PathTree.Node top : root.children().values()) {
             String groupPackage = config.resourcesPackage() + "." + Naming.packageSegment(top.name());
             String groupClass = Naming.pascal(top.name()) + "Resource";
-            rootLocators.add(new LocatorModel("get" + groupClass, top.name(), null, groupPackage, groupClass));
+            rootLocators.add(new LocatorModel("get" + groupClass, top.name(), null, null, groupPackage, groupClass));
             interfaceOf(top, groupPackage, Naming.pascal(top.name()), true, models);
         }
 
@@ -126,8 +129,9 @@ final class ResourceModelBuilder {
             String locatorName = childIsParam
                     ? "get" + childBase + "Resource"
                     : "get" + Naming.pascal(child.name()) + "Resource";
-            locators.add(new LocatorModel(locatorName, child.name(),
-                    childIsParam ? child.name().substring(1, child.name().length() - 1) : null,
+            String pathParam = childIsParam ? child.name().substring(1, child.name().length() - 1) : null;
+            locators.add(new LocatorModel(locatorName, child.name(), pathParam,
+                    childIsParam ? locatorParamType(child, pathParam) : null,
                     childModel.packageName(), childModel.className()));
         }
         ResourceModel model = new ResourceModel(packageName, className, null, operations, locators);
@@ -145,6 +149,62 @@ final class ResourceModelBuilder {
         return "id".equals(param)
                 ? Naming.pascal(Naming.singular(parent.name()))
                 : Naming.pascalParam(param);
+    }
+
+    /**
+     * Тип параметра локатора {param}. В OpenAPI тип параметра пути объявляет каждая ручка, а локатор обслуживает
+     * все ручки своего поддерева: тип берётся, если все объявившие его ручки согласны (number → Integer,
+     * $ref на энум → энум — как у параметров ручек). Разошлись — String и WARN; ни одна не объявила — String.
+     */
+    private TypeName locatorParamType(PathTree.Node node, String param) {
+        Map<TypeName, List<String>> declared = new LinkedHashMap<>();
+        collectPathParamTypes(node, param, declared);
+        if (declared.size() == 1) {
+            return declared.keySet().iterator().next();
+        }
+        if (declared.size() > 1) {
+            List<String> variants = new ArrayList<>();
+            declared.forEach((type, operations) -> variants.add(simpleName(type) + ": " + String.join(", ", operations)));
+            warnings.add("Параметр пути {" + param + "} в ручках под " + node.fullPath() + " объявлен с разными типами ("
+                    + String.join("; ", variants) + ") — у локатора будет String");
+        }
+        return STRING;
+    }
+
+    /** Типы параметра param во всех ручках поддерева node: тип → ручки, где он так объявлен. */
+    private void collectPathParamTypes(PathTree.Node node, String param, Map<TypeName, List<String>> declared) {
+        if (node.item() != null) {
+            for (Map.Entry<PathItem.HttpMethod, Operation> entry : node.item().readOperationsMap().entrySet()) {
+                Parameter parameter = pathParameter(node.item(), entry.getValue(), param);
+                if (parameter != null) {
+                    declared.computeIfAbsent(types.paramType(parameter.getSchema()), type -> new ArrayList<>())
+                            .add(entry.getKey().name() + " " + node.fullPath());
+                }
+            }
+        }
+        for (PathTree.Node child : node.children().values()) {
+            collectPathParamTypes(child, param, declared);
+        }
+    }
+
+    /** Объявление параметра пути в ручке; объявление на самой ручке важнее общего для пути (parameters у path item). */
+    private static Parameter pathParameter(PathItem item, Operation operation, String name) {
+        Parameter own = pathParameter(operation.getParameters(), name);
+        return own != null ? own : pathParameter(item.getParameters(), name);
+    }
+
+    private static Parameter pathParameter(List<Parameter> parameters, String name) {
+        if (parameters == null) {
+            return null;
+        }
+        return parameters.stream()
+                .filter(parameter -> "path".equals(parameter.getIn()) && name.equals(parameter.getName()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static String simpleName(TypeName type) {
+        return type instanceof ClassName className ? className.simpleName() : type.toString();
     }
 
     /** Ручки узла; с inlinePath ({param}-лист) ручки уходят в родителя с @Path("{param}"). */
