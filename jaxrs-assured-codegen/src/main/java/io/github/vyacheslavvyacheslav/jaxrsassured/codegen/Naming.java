@@ -2,6 +2,7 @@ package io.github.vyacheslavvyacheslav.jaxrsassured.codegen;
 
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Правила именования сгенерированного кода.
@@ -15,6 +16,8 @@ public final class Naming {
             "new", "package", "private", "protected", "public", "return", "short", "static", "strictfp",
             "super", "switch", "synchronized", "this", "throw", "throws", "transient", "try", "void",
             "volatile", "while", "var", "record", "yield", "sealed", "permits");
+
+    private static final Pattern HEADER_NAME = Pattern.compile("[!#$%&'*+.^_`|~0-9A-Za-z-]+");
 
     private Naming() {
     }
@@ -90,6 +93,11 @@ public final class Naming {
             return w.substring(0, w.length() - 1);
         }
         return w;
+    }
+
+    /** Имя HTTP-заголовка — token из RFC 9110: латиница, цифры и !#$%&'*+-.^_`|~, без пробелов и двоеточия. */
+    public static boolean isHeaderName(String s) {
+        return s != null && HEADER_NAME.matcher(s).matches();
     }
 
     public static boolean isIdentifier(String s) {

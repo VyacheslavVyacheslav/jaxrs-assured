@@ -95,6 +95,38 @@ class MainTest {
     }
 
     @Test
+    void badIgnoreHeaderIsUsageError() throws Exception {
+        Run run = run(writeSpec("spec.json", SPEC),
+                tempDir.resolve("out").toString(), "gen.test", "--ignore-header", "X Actor");
+        assertEquals(2, run.code());
+        assertTrue(run.stderr().contains("--ignore-header"));
+    }
+
+    @Test
+    void ignoreHeaderFlagDropsHeaderParam() throws Exception {
+        String spec = writeSpec("spec-headers.json", """
+                {
+                  "openapi": "3.0.0",
+                  "info": {"title": "t", "version": "1.0"},
+                  "paths": {
+                    "/api/v1/auth/me": {"get": {"operationId": "AuthController_me",
+                        "parameters": [{"name": "authorization", "in": "header", "schema": {"type": "string"}}],
+                        "responses": {"200": {"description": "ok"}}}}
+                  }
+                }
+                """);
+        Path withHeader = tempDir.resolve("with-header");
+        Path withoutHeader = tempDir.resolve("without-header");
+
+        assertEquals(0, run(spec, withHeader.toString(), "gen.test").code());
+        assertEquals(0, run(spec, withoutHeader.toString(), "gen.test", "--ignore-header", "Authorization").code());
+
+        String me = "gen/test/resources/auth/AuthMeResource.java";
+        assertTrue(Files.readString(withHeader.resolve(me)).contains("@HeaderParam(\"authorization\")"));
+        assertFalse(Files.readString(withoutHeader.resolve(me)).contains("@HeaderParam"));
+    }
+
+    @Test
     void blankOrMalformedBasePackageIsUsageError() throws Exception {
         String spec = writeSpec("spec.json", SPEC);
         String outDir = tempDir.resolve("out").toString();

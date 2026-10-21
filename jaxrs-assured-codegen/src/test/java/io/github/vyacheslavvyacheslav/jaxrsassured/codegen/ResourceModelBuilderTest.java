@@ -23,6 +23,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -240,6 +241,35 @@ class ResourceModelBuilderTest {
     }
 
     @Test
+    void ignoredHeadersAreNotGeneratedAndUnknownOnesAreReported() {
+        OpenAPI spec = new OpenAPI().paths(new Paths()
+                .addPathItem("/api/v1/auth/me", new PathItem().get(new Operation()
+                        .operationId("AuthController_me")
+                        .addParametersItem(new Parameter().name("authorization").in("header").schema(new StringSchema()))
+                        .addParametersItem(new Parameter().name("X-Request-Id").in("header").schema(new StringSchema()))
+                        .responses(responses200())))
+                .addPathItem("/api/v1/zones", new PathItem().post(new Operation()
+                        .operationId("ZonesController_create")
+                        .addParametersItem(new Parameter().name("X-Actor").in("header").schema(new StringSchema()))
+                        .addParametersItem(new Parameter().name("X-Requested-By").in("header").schema(new StringSchema()))
+                        .requestBody(new RequestBody().required(true).content(new Content().addMediaType("application/json",
+                                new MediaType().schema(new ObjectSchema()))))
+                        .responses(responses200()))));
+        GenConfig config = new GenConfig(Path.of("spec.json"), Path.of("out"), "gen", "api/v1", "V1Resource",
+                List.of(), null, Map.of(), false, false, Map.of(),
+                Set.of("Authorization", "x-actor", "X-REQUESTED-BY", "X-Tenant"));
+
+        ResourceModelBuilder builder = new ResourceModelBuilder(config, new SchemaTypes(config, spec));
+        List<ResourceModel> models = builder.build(PathTree.of(spec));
+
+        // регистр не важен: Authorization из настройки убирает authorization из спеки
+        assertEquals(List.of("HEADER:X-Request-Id"), paramKeys(operation(models, "AuthMeResource", "me")));
+        assertEquals(List.of("BODY:body"), paramKeys(operation(models, "ZonesResource", "create")));
+        assertEquals(List.of("Заголовок x-tenant из ignoreHeaders (--ignore-header) не встретился ни в одной ручке"),
+                builder.warnings());
+    }
+
+    @Test
     void pathsOutsideRootAreRejected() {
         OpenAPI spec = new OpenAPI().paths(new Paths()
                 .addPathItem("/api/v1/drivers", new PathItem().get(new Operation().operationId("list")))
@@ -406,6 +436,10 @@ class ResourceModelBuilderTest {
                         .requestBody(new RequestBody().required(true).content(new Content().addMediaType("application/json",
                                 new MediaType().schema(new Schema<>().$ref("#/components/schemas/SyncDriversDto")))))
                         .responses(new ApiResponses().addApiResponse("202", new ApiResponse())))));
+    }
+
+    private static List<String> paramKeys(OperationModel operation) {
+        return operation.params().stream().map(p -> p.in().name() + ":" + p.paramName()).toList();
     }
 
     /** Ручки интерфейса коротко: имя(места параметров) и @Consumes. */

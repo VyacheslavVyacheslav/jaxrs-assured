@@ -592,6 +592,7 @@ Main <spec> <outDir> <basePackage> [флаги]      — генерация ис
 | `--root <путь>` | `rootPath` | корень дерева путей, по умолчанию `api/v1`; class-level `@Path` корня |
 | `--root-name <Имя>` | `rootName` | имя корневого интерфейса, по умолчанию `V1Resource` |
 | `--ignore <regex>` | `ignorePaths` (`<ignorePath>`) | пропустить пути, целиком совпавшие с regex; пути вне `--root` без него — ошибка |
+| `--ignore-header <имя>` | `ignoreHeaders` (`<ignoreHeader>`) | заголовок не становится параметром методов — его ставит фильтр (`BearerAuthFilter`) или `setHeader`; регистр не важен; имя, которого нет в спеке, — WARN |
 | `--super-interface полный.Класс` | `superInterface` | супер-интерфейс ресурсов: `XResource extends Класс<XResource>`; для core — `…core.clients.ConfigurationResource` |
 | `--import Схема=полный.Класс` | `importMappings` (`<Схема>класс</Схема>`) | схему не генерировать, ссылки типировать указанным классом |
 | `--lombok` | `lombok` | DTO на аннотациях Lombok (см. [Два стиля DTO](#два-стиля-dto)) |
@@ -620,6 +621,9 @@ Main <spec> <outDir> <basePackage> [флаги]      — генерация ис
 ```
 
 - `{param}` без детей инлайнится в родителя: `@Path("{id}")` + `@PathParam`.
+- Header-параметр — `@HeaderParam` у метода. Заголовки, которые в тестах ставит фильтр или `setHeader`
+  (`Authorization`, `X-Actor`), лучше перечислить в `--ignore-header`: иначе в каждом вызове придется передавать
+  `null`, а токен, переданный и параметром, и через `BearerAuthFilter`, уйдет двумя значениями.
 - `{param}` с детьми — свой интерфейс за локатором: `StoreResource getStoreResource(@PathParam("id") Number id)`.
   Тип параметра локатора берётся из ручек поддерева по тем же правилам, что у параметров ручек (`number` → `Number`,
   `$ref` на энум → энум); разные числовые (`integer` в одной ручке, `number` в другой) — `Number`. Если ручки

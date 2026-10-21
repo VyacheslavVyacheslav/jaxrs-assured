@@ -33,6 +33,8 @@ import java.util.Set;
  *         при расхождении String;</li>
  *     <li>имя метода — operationId без префикса контроллера ("XxxController_findOne" → findOne),
  *         при коллизии в интерфейсе — полный operationId;</li>
+ *     <li>header-параметры из ignoreHeaders (без учета регистра) не становятся параметрами метода —
+ *         их ставят фильтры клиента или setHeader;</li>
  *     <li>тело — параметр-DTO и @Consumes; необязательное тело (requestBody.required false или не указан —
  *         по стандарту OpenAPI это false) — ещё и перегрузка без тела и без @Consumes;</li>
  *     <li>ответ — первый media type минимального 2xx: text/event-stream → InputStream (поток не кончается,
@@ -53,6 +55,8 @@ final class ResourceModelBuilder {
     private final SchemaTypes types;
     private final List<String> warnings = new ArrayList<>();
     private final Map<String, Set<String>> takenNames = new HashMap<>();
+    /** Заголовки из ignoreHeaders, которые встретились в ручках: остальные — повод для WARN (опечатка?). */
+    private final Set<String> matchedIgnoredHeaders = new HashSet<>();
 
     ResourceModelBuilder(GenConfig config, SchemaTypes types) {
         this.config = config;
@@ -78,6 +82,11 @@ final class ResourceModelBuilder {
 
         models.add(0, new ResourceModel(config.basePackage(), config.rootClassName(),
                 config.rootPath(), List.of(), rootLocators));
+        config.ignoreHeaders().stream()
+                .filter(header -> !matchedIgnoredHeaders.contains(header))
+                .sorted()
+                .forEach(header -> warnings.add("Заголовок " + header + " из ignoreHeaders (--ignore-header) "
+                        + "не встретился ни в одной ручке"));
         return models;
     }
 
@@ -291,8 +300,15 @@ final class ResourceModelBuilder {
                 }
                 case "query" -> params.add(new ParamModel(ParamModel.In.QUERY, parameter.getName(),
                         Naming.parameter(parameter.getName()), types.paramType(parameter.getSchema())));
-                case "header" -> params.add(new ParamModel(ParamModel.In.HEADER, parameter.getName(),
-                        Naming.parameter(parameter.getName()), types.paramType(parameter.getSchema())));
+                case "header" -> {
+                    if (config.ignoredHeader(parameter.getName())) {
+                        // заголовок ставит фильтр клиента или setHeader — параметром метода не нужен
+                        matchedIgnoredHeaders.add(GenConfig.headerKey(parameter.getName()));
+                    } else {
+                        params.add(new ParamModel(ParamModel.In.HEADER, parameter.getName(),
+                                Naming.parameter(parameter.getName()), types.paramType(parameter.getSchema())));
+                    }
+                }
                 case "cookie" -> warnings.add("Cookie-параметр пропущен: " + parameter.getName()
                         + " (" + node.fullPath() + ")");
                 default -> warnings.add("Параметр без in пропущен: " + parameter.getName()

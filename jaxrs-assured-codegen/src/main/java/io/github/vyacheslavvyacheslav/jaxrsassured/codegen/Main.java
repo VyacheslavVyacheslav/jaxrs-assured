@@ -4,8 +4,10 @@ import java.io.PrintStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -14,7 +16,8 @@ import java.util.regex.PatternSyntaxException;
  * <ul>
  *     <li>{@code Main <spec>} — печать дерева путей (проверка парсинга и группировки);</li>
  *     <li>{@code Main <spec> <outDir> <basePackage> [--root api/v1] [--root-name V1Resource]
- *         [--ignore <regex>]... [--super-interface полный.Класс] [--import Схема=полный.класс]... [--lombok]
+ *         [--ignore <regex>]... [--ignore-header имя]... [--super-interface полный.Класс]
+ *         [--import Схема=полный.класс]... [--lombok]
  *         [--split-model [--model-package Схема=группа]...]}
  *         — генерация исходников;</li>
  *     <li>{@code Main --help} — справка.</li>
@@ -34,6 +37,8 @@ public final class Main {
               --root <путь>                    корень дерева путей (по умолчанию api/v1)
               --root-name <Имя>                имя корневого интерфейса (по умолчанию V1Resource)
               --ignore <regex>                 пропустить совпавшие пути (повторяемый)
+              --ignore-header <имя>            не делать заголовок параметром методов: его ставит фильтр
+                                               или setHeader, например authorization (повторяемый)
               --super-interface полный.Класс   супер-интерфейс ресурсов, параметризуется самим
                                                интерфейсом: Класс<Ресурс> (по умолчанию нет)
               --import Схема=полный.Класс      схему не генерировать, ссылки типировать классом (повторяемый)
@@ -101,6 +106,7 @@ public final class Main {
         boolean lombok = false;
         boolean splitModel = false;
         List<Pattern> ignore = new ArrayList<>();
+        Set<String> ignoreHeaders = new LinkedHashSet<>();
         Map<String, String> importMappings = new LinkedHashMap<>();
         Map<String, String> modelPackages = new LinkedHashMap<>();
         for (int i = 3; i < args.length; i++) {
@@ -108,6 +114,13 @@ public final class Main {
                 case "--root" -> rootPath = value(args, ++i, "--root");
                 case "--root-name" -> rootClassName = value(args, ++i, "--root-name");
                 case "--ignore" -> ignore.add(regex(value(args, ++i, "--ignore")));
+                case "--ignore-header" -> {
+                    String header = value(args, ++i, "--ignore-header");
+                    if (!Naming.isHeaderName(header)) {
+                        throw new CliException("Ожидалось имя заголовка в --ignore-header: \"" + header + "\"");
+                    }
+                    ignoreHeaders.add(header);
+                }
                 case "--super-interface" -> {
                     superInterface = value(args, ++i, "--super-interface");
                     if (!superInterface.contains(".") || !Naming.isQualifiedName(superInterface)) {
@@ -137,7 +150,7 @@ public final class Main {
             throw new CliException("--model-package работает только вместе с --split-model");
         }
         GenConfig config = new GenConfig(specFile, outDir, basePackage, rootPath, rootClassName,
-                ignore, superInterface, importMappings, lombok, splitModel, modelPackages);
+                ignore, superInterface, importMappings, lombok, splitModel, modelPackages, ignoreHeaders);
         Generator.GenerationResult result = Generator.run(config);
         out.printf("Сгенерировано интерфейсов: %d, DTO: %d → %s%n",
                 result.interfaces(), result.dtos(), outDir);

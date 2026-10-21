@@ -29,6 +29,7 @@ class GenerateMojoTest {
               "info": {"title": "t", "version": "1.0"},
               "paths": {
                 "/api/v1/drivers": {"get": {"operationId": "DriversController_findAll",
+                    "parameters": [{"name": "X-Actor", "in": "header", "schema": {"type": "string"}}],
                     "responses": {"200": {"description": "ok"}}}},
                 "/metrics": {"get": {"operationId": "MetricsController_get",
                     "responses": {"200": {"description": "ok"}}}}
@@ -95,6 +96,19 @@ class GenerateMojoTest {
     }
 
     @Test
+    void ignoreHeadersReachGenerator() throws Exception {
+        GenerateMojo mojo = mojo();
+        Path drivers = mojo.outputDirectory.toPath().resolve("gen/test/resources/drivers/DriversResource.java");
+
+        mojo.execute();
+        assertTrue(Files.readString(drivers).contains("@HeaderParam(\"X-Actor\")"));
+
+        mojo.ignoreHeaders = List.of("x-actor");
+        mojo.execute();
+        assertFalse(Files.readString(drivers).contains("@HeaderParam"), "Регистр имени не важен");
+    }
+
+    @Test
     void splitModelAndPins() throws Exception {
         GenerateMojo mojo = mojo();
         mojo.splitModel = true;
@@ -126,6 +140,10 @@ class GenerateMojoTest {
         GenerateMojo badRegex = mojo();
         badRegex.ignorePaths = List.of("[");
         assertThrows(MojoExecutionException.class, badRegex::execute);
+
+        GenerateMojo badHeader = mojo();
+        badHeader.ignoreHeaders = List.of("X Actor");
+        assertThrows(MojoExecutionException.class, badHeader::execute);
 
         GenerateMojo badSuper = mojo();
         badSuper.superInterface = "Base";

@@ -11,8 +11,10 @@ import org.apache.maven.project.MavenProject;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -65,6 +67,13 @@ public class GenerateMojo extends AbstractMojo {
     /** Пропустить пути, целиком совпавшие с regex (флаг --ignore). */
     @Parameter
     List<String> ignorePaths;
+
+    /**
+     * Заголовки, которые не становятся параметрами методов — их ставит фильтр или setHeader (флаг --ignore-header):
+     * {@code <ignoreHeaders><ignoreHeader>authorization</ignoreHeader></ignoreHeaders>}. Регистр не важен.
+     */
+    @Parameter
+    List<String> ignoreHeaders;
 
     /** Супер-интерфейс ресурсов, параметризуется самим интерфейсом: Класс&lt;Ресурс&gt; (флаг --super-interface). */
     @Parameter(property = "jaxrsassured.superInterface")
@@ -139,6 +148,14 @@ public class GenerateMojo extends AbstractMojo {
                 throw new MojoExecutionException("codegen: плохой regex в ignorePaths: " + regex, e);
             }
         }
+        Set<String> headers = new LinkedHashSet<>();
+        for (String header : ignoreHeaders == null ? List.<String>of() : ignoreHeaders) {
+            String name = header == null ? "" : header.trim();
+            if (!Naming.isHeaderName(name)) {
+                throw new MojoExecutionException("codegen: ожидалось имя заголовка в ignoreHeaders: \"" + header + "\"");
+            }
+            headers.add(name);
+        }
         Map<String, String> mappings = importMappings == null ? Map.of() : importMappings;
         for (Map.Entry<String, String> mapping : mappings.entrySet()) {
             if (!Naming.isIdentifier(mapping.getKey()) || !mapping.getValue().contains(".")
@@ -163,6 +180,6 @@ public class GenerateMojo extends AbstractMojo {
             throw new MojoExecutionException("codegen: modelPackages работает только вместе со splitModel");
         }
         return new GenConfig(spec.toPath(), outputDirectory.toPath(), basePackage, rootPath, rootName,
-                ignore, superInterface, mappings, lombok, splitModel, pins);
+                ignore, superInterface, mappings, lombok, splitModel, pins, headers);
     }
 }
