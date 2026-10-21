@@ -270,6 +270,43 @@ class ResourceModelBuilderTest {
     }
 
     @Test
+    void inlineEnumParamsBecomeNestedEnums() {
+        OpenAPI spec = new OpenAPI().paths(new Paths()
+                .addPathItem("/api/v1/tasks", new PathItem().get(new Operation()
+                        .operationId("TasksController_findAll")
+                        .addParametersItem(queryEnum("status", "new", "done"))
+                        .addParametersItem(new Parameter().name("zones").in("query").schema(
+                                new ArraySchema().items(new StringSchema()._enum(List.of("msk", "spb")))))
+                        .responses(responses200())))
+                .addPathItem("/api/v1/tasks/{id}", new PathItem()
+                        // те же значения под тем же именем — тот же энум
+                        .get(new Operation().operationId("TasksController_findOne")
+                                .addParametersItem(pathParam("id", new StringSchema()))
+                                .addParametersItem(queryEnum("status", "new", "done"))
+                                .responses(responses200()))
+                        // другие значения — с префиксом метода
+                        .patch(new Operation().operationId("TasksController_update")
+                                .addParametersItem(pathParam("id", new StringSchema()))
+                                .addParametersItem(queryEnum("status", "draft", "final"))
+                                .responses(responses200()))));
+
+        ResourceModelBuilder builder = new ResourceModelBuilder(CONFIG, new SchemaTypes(CONFIG, spec));
+        List<ResourceModel> models = builder.build(PathTree.of(spec));
+
+        String tasks = "gen.resources.tasks.TasksResource";
+        assertEquals(tasks + ".Status", paramType(operation(models, "TasksResource", "findAll"), "status"));
+        assertEquals("java.util.List<" + tasks + ".Zones>", paramType(operation(models, "TasksResource", "findAll"), "zones"));
+        assertEquals(tasks + ".Status", paramType(operation(models, "TasksResource", "findOne"), "status"));
+        assertEquals(tasks + ".UpdateStatus", paramType(operation(models, "TasksResource", "update"), "status"));
+
+        ResourceModel resource = byName(models, "TasksResource");
+        assertEquals(List.of("Status", "Zones", "UpdateStatus"), resource.enums().stream().map(EnumModel::className).toList());
+        assertEquals(List.of("NEW", "DONE"), resource.enums().get(0).constants().stream().map(EnumModel.Constant::name).toList());
+        assertEquals(List.of("new", "done"), resource.enums().get(0).constants().stream().map(EnumModel.Constant::value).toList());
+        assertEquals(List.of(), builder.warnings());
+    }
+
+    @Test
     void pathsOutsideRootAreRejected() {
         OpenAPI spec = new OpenAPI().paths(new Paths()
                 .addPathItem("/api/v1/drivers", new PathItem().get(new Operation().operationId("list")))
@@ -436,6 +473,18 @@ class ResourceModelBuilderTest {
                         .requestBody(new RequestBody().required(true).content(new Content().addMediaType("application/json",
                                 new MediaType().schema(new Schema<>().$ref("#/components/schemas/SyncDriversDto")))))
                         .responses(new ApiResponses().addApiResponse("202", new ApiResponse())))));
+    }
+
+    private static Parameter queryEnum(String name, String... values) {
+        return new Parameter().name(name).in("query").schema(new StringSchema()._enum(List.of(values)));
+    }
+
+    private static String paramType(OperationModel operation, String paramName) {
+        return operation.params().stream()
+                .filter(p -> p.paramName().equals(paramName))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Нет параметра " + paramName))
+                .typeName().toString();
     }
 
     private static List<String> paramKeys(OperationModel operation) {

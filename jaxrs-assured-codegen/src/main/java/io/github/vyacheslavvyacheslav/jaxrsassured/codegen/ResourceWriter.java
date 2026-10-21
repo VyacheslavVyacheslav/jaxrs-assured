@@ -72,6 +72,11 @@ final class ResourceWriter {
         for (LocatorModel locator : model.locators()) {
             builder.addMethod(locatorSpec(locator));
         }
+        // встроенные enum параметров: в URL уходит значение из спеки — toString() энума;
+        // тип внутри интерфейса JavaPoet требует пометить public static (в исходник неявные модификаторы не попадут)
+        for (EnumModel enumModel : model.enums()) {
+            builder.addType(DtoWriter.enumSpec(enumModel, null).toBuilder().addModifiers(Modifier.STATIC).build());
+        }
         return builder.build();
     }
 

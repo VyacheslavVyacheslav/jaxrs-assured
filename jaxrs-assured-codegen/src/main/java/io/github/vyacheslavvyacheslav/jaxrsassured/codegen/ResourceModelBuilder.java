@@ -1,6 +1,7 @@
 package io.github.vyacheslavvyacheslav.jaxrsassured.codegen;
 
 import com.squareup.javapoet.ClassName;
+import com.squareup.javapoet.ParameterizedTypeName;
 import com.squareup.javapoet.TypeName;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
@@ -33,6 +34,7 @@ import java.util.Set;
  *         при расхождении String;</li>
  *     <li>имя метода — operationId без префикса контроллера ("XxxController_findOne" → findOne),
  *         при коллизии в интерфейсе — полный operationId;</li>
+ *     <li>встроенный enum параметра (и массив таких) — вложенный энум интерфейса: status → Resource.Status;</li>
  *     <li>header-параметры из ignoreHeaders (без учета регистра) не становятся параметрами метода —
  *         их ставят фильтры клиента или setHeader;</li>
  *     <li>тело — параметр-DTO и @Consumes; необязательное тело (requestBody.required false или не указан —
@@ -81,7 +83,7 @@ final class ResourceModelBuilder {
         }
 
         models.add(0, new ResourceModel(config.basePackage(), config.rootClassName(),
-                config.rootPath(), List.of(), rootLocators));
+                config.rootPath(), List.of(), rootLocators, List.of()));
         config.ignoreHeaders().stream()
                 .filter(header -> !matchedIgnoredHeaders.contains(header))
                 .sorted()
@@ -127,14 +129,15 @@ final class ResourceModelBuilder {
         register(packageName, className, node.fullPath());
 
         Set<String> usedNames = new HashSet<>();
-        List<OperationModel> operations = new ArrayList<>(operationsOf(node, null, usedNames));
+        NestedEnums enums = new NestedEnums(packageName, className);
+        List<OperationModel> operations = new ArrayList<>(operationsOf(node, null, usedNames, enums));
         List<LocatorModel> locators = new ArrayList<>();
         String childrenBase = groupRoot ? Naming.pascal(Naming.singular(node.name())) : ownBase;
 
         for (PathTree.Node child : node.children().values()) {
             boolean childIsParam = child.name().startsWith("{");
             if (childIsParam && child.childrenCount() == 0) {
-                operations.addAll(operationsOf(child, child.name(), usedNames));
+                operations.addAll(operationsOf(child, child.name(), usedNames, enums));
                 continue;
             }
             String childBase = childIsParam
@@ -149,7 +152,7 @@ final class ResourceModelBuilder {
                     childIsParam ? locatorParamType(child, pathParam) : null,
                     childModel.packageName(), childModel.className()));
         }
-        ResourceModel model = new ResourceModel(packageName, className, null, operations, locators);
+        ResourceModel model = new ResourceModel(packageName, className, null, operations, locators, enums.models());
         models.add(model);
         return model;
     }
@@ -227,7 +230,8 @@ final class ResourceModelBuilder {
     }
 
     /** Ручки узла; с inlinePath ({param}-лист) ручки уходят в родителя с @Path("{param}"). */
-    private List<OperationModel> operationsOf(PathTree.Node node, String inlinePath, Set<String> usedNames) {
+    private List<OperationModel> operationsOf(PathTree.Node node, String inlinePath, Set<String> usedNames,
+                                              NestedEnums enums) {
         if (node.item() == null) {
             return List.of();
         }
@@ -239,7 +243,9 @@ final class ResourceModelBuilder {
                 warnings.add("HTTP-метод не поддержан, ручка пропущена: " + http + " " + node.fullPath());
                 continue;
             }
-            List<ParamModel> params = paramsOf(operation, inlinePath, node);
+            // имя метода — до параметров: с ним различаются вложенные энумы одноимённых параметров
+            String methodName = methodName(operation, http, node, usedNames);
+            List<ParamModel> params = paramsOf(operation, inlinePath, node, methodName, enums);
             List<ParamModel> withoutBody = uniqueVarNames(params);
             String mediaType = consumes(operation);
             if (mediaType != null) {
@@ -249,7 +255,6 @@ final class ResourceModelBuilder {
             }
             Response response = response(operation, node);
             String path = inlinePath == null ? "" : inlinePath;
-            String methodName = methodName(operation, http, node, usedNames);
             result.add(new OperationModel(http, path, methodName, uniqueVarNames(params), mediaType,
                     response.produces(), response.type()));
             if (mediaType != null && !Boolean.TRUE.equals(operation.getRequestBody().getRequired())) {
@@ -284,7 +289,8 @@ final class ResourceModelBuilder {
         return List.copyOf(result);
     }
 
-    private List<ParamModel> paramsOf(Operation operation, String inlinePath, PathTree.Node node) {
+    private List<ParamModel> paramsOf(Operation operation, String inlinePath, PathTree.Node node, String methodName,
+                                      NestedEnums enums) {
         List<ParamModel> params = new ArrayList<>();
         if (operation.getParameters() == null) {
             return params;
@@ -294,19 +300,19 @@ final class ResourceModelBuilder {
                 case "path" -> {
                     if (inlinePath != null) {
                         params.add(new ParamModel(ParamModel.In.PATH, parameter.getName(),
-                                Naming.parameter(parameter.getName()), types.paramType(parameter.getSchema())));
+                                Naming.parameter(parameter.getName()), paramType(parameter, methodName, enums)));
                     }
                     // без инлайна параметр пути уже съеден локаторами родителей
                 }
                 case "query" -> params.add(new ParamModel(ParamModel.In.QUERY, parameter.getName(),
-                        Naming.parameter(parameter.getName()), types.paramType(parameter.getSchema())));
+                        Naming.parameter(parameter.getName()), paramType(parameter, methodName, enums)));
                 case "header" -> {
                     if (config.ignoredHeader(parameter.getName())) {
                         // заголовок ставит фильтр клиента или setHeader — параметром метода не нужен
                         matchedIgnoredHeaders.add(GenConfig.headerKey(parameter.getName()));
                     } else {
                         params.add(new ParamModel(ParamModel.In.HEADER, parameter.getName(),
-                                Naming.parameter(parameter.getName()), types.paramType(parameter.getSchema())));
+                                Naming.parameter(parameter.getName()), paramType(parameter, methodName, enums)));
                     }
                 }
                 case "cookie" -> warnings.add("Cookie-параметр пропущен: " + parameter.getName()
@@ -316,6 +322,65 @@ final class ResourceModelBuilder {
             }
         }
         return params;
+    }
+
+    /**
+     * Тип параметра ручки: встроенный enum (и массив таких) — вложенный энум интерфейса, как у свойств DTO;
+     * остальное — как решает SchemaTypes.
+     */
+    private TypeName paramType(Parameter parameter, String methodName, NestedEnums enums) {
+        Schema<?> schema = parameter.getSchema();
+        if (isInlineEnum(schema)) {
+            return enums.enumFor(parameter.getName(), methodName, schema.getEnum());
+        }
+        if (schema != null && "array".equals(schema.getType()) && isInlineEnum(schema.getItems())) {
+            return ParameterizedTypeName.get(ClassName.get(List.class),
+                    enums.enumFor(parameter.getName(), methodName, schema.getItems().getEnum()));
+        }
+        return types.paramType(schema);
+    }
+
+    private static boolean isInlineEnum(Schema<?> schema) {
+        return schema != null && schema.get$ref() == null && schema.getEnum() != null && !schema.getEnum().isEmpty();
+    }
+
+    /**
+     * Вложенные энумы интерфейса из встроенных enum параметров. Имя — Pascal(имя параметра): status → Status.
+     * Те же значения под тем же именем — тот же энум; другие значения — с префиксом метода (UpdateStatus),
+     * дальше — с номером (Status2).
+     */
+    private final class NestedEnums {
+
+        private final String packageName;
+        private final String className;
+        private final Map<String, EnumModel> byName = new LinkedHashMap<>();
+
+        NestedEnums(String packageName, String className) {
+            this.packageName = packageName;
+            this.className = className;
+        }
+
+        ClassName enumFor(String paramName, String methodName, List<?> values) {
+            String base = Naming.pascalParam(paramName);
+            List<EnumModel.Constant> constants = EnumModel.constantsOf(values, className + "." + base, warnings);
+            String name = base;
+            for (int attempt = 1; ; attempt++) {
+                EnumModel existing = byName.get(name);
+                if (existing == null) {
+                    byName.put(name, new EnumModel(name, constants));
+                    break;
+                }
+                if (existing.constants().equals(constants)) {
+                    break;
+                }
+                name = attempt == 1 ? Naming.pascalParam(methodName) + base : base + attempt;
+            }
+            return ClassName.get(packageName, className, name);
+        }
+
+        List<EnumModel> models() {
+            return List.copyOf(byName.values());
+        }
     }
 
     /** operationId "XxxController_findOne" → findOne; при коллизии в интерфейсе — полный operationId. */

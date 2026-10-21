@@ -664,6 +664,7 @@ SSE-вызов возвращается сразу, события читают�
 | `$ref` на схему; `allOf [$ref X]` без своих свойств (ссылка с `description`/`nullable`) | DTO `X` |
 | энум (`enum` схемы или свойства) | Java-энум: константы `E_BOOK`, исходное значение `e_book` — в JSON (`@JsonValue`/`@JsonCreator`) и в URL (`toString()`) |
 | `$ref` на энум в query/path/header-параметре и у локатора | тот же энум; в URL уходит значение из спеки: `format=e_book`, а не `E_BOOK` |
+| встроенный `enum` в query/path/header-параметре | вложенный энум интерфейса ресурса: `OrdersResource.Status`, массив — `List<Status>`; те же значения под тем же именем — один энум, другие — с префиксом метода: `UpdateStatus`; у локатора — `String` |
 | `allOf [$ref PageDto, {data: array of $ref X}]` в ответе | `PageDto<X>` |
 | `object` без свойств, `anyOf`/`oneOf`, наследование через `allOf` | `JsonNode` (+ WARN) |
 

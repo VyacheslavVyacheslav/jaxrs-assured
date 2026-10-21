@@ -12,6 +12,7 @@ import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.model.Genre;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.model.PageDto;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.resources.books.BooksResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.resources.orders.OrderCancellationsResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.resources.orders.OrdersResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.resources.stores.StoreResource;
 import jakarta.ws.rs.NotFoundException;
 import org.junit.jupiter.api.AfterEach;
@@ -168,6 +169,13 @@ class EndToEndTest {
                 .statusCode(400)
                 .body("code", equalTo("VALIDATION_FAILED"));
         assertEquals("/api/v1/stores/abc/books", lastUri);
+    }
+
+    @Test
+    void inlineEnumQueryParamGoesAsSpecValue() {
+        api.getOrdersResource().findAll(OrdersResource.Status.PAID);
+
+        assertEquals("/api/v1/orders?status=PAID", lastUri);
     }
 
     @Test

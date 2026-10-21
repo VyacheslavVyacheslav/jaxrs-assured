@@ -35,6 +35,7 @@ import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.e
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.giftcards.GiftCardsResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.orders.OrderCancellationsResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.orders.OrderReceiptResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.orders.OrdersResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.reports.ReportArchivesResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.reports.ReportFileResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.stores.StoreBooksResource;
@@ -106,6 +107,15 @@ class GeneratedCodeTest {
         assertEquals(BookSnapshotsResource.class, snapshots.getReturnType());
         assertEquals(SnapshotSyncResultDto.class,
                 BookSnapshotsResource.class.getMethod("sync", SyncBooksDto.class).getReturnType());
+    }
+
+    @Test
+    void inlineEnumQueryParamIsNestedEnum() throws Exception {
+        // status в спеке — встроенный enum: вложенный энум интерфейса вместо String
+        Method findAll = OrdersResource.class.getMethod("findAll", OrdersResource.Status.class);
+        assertEquals(List.of("query:status"), params(findAll));
+        assertEquals(List.of("NEW", "PAID", "SHIPPED", "DELIVERED", "CANCELLED"),
+                Arrays.stream(OrdersResource.Status.values()).map(OrdersResource.Status::toString).toList());
     }
 
     @Test

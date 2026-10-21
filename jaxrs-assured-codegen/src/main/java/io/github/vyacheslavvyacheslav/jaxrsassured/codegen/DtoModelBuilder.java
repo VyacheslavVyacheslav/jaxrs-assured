@@ -154,30 +154,7 @@ final class DtoModelBuilder {
                 fields, nestedEnums, null);
     }
 
-    /** Значения энума → константы; коллизии после нормализации получают суффикс _2, _3... */
     private List<EnumModel.Constant> constantsOf(List<?> values, String context) {
-        List<EnumModel.Constant> constants = new ArrayList<>();
-        Set<String> taken = new HashSet<>();
-        for (Object value : values) {
-            if (value == null) {
-                warnings.add("Энум " + context + " содержит null — константа пропущена");
-                continue;
-            }
-            String name = Naming.enumConstant(value.toString());
-            if (!Naming.isUsableIdentifier(name)) {
-                name = "_" + name;
-            }
-            String unique = name;
-            int suffix = 2;
-            while (!taken.add(unique)) {
-                unique = name + "_" + suffix++;
-            }
-            if (!unique.equals(name)) {
-                warnings.add("Константа энума " + context + " дублируется после нормализации: "
-                        + value + " → " + unique);
-            }
-            constants.add(new EnumModel.Constant(unique, String.valueOf(value)));
-        }
-        return constants;
+        return EnumModel.constantsOf(values, context, warnings);
     }
 }
