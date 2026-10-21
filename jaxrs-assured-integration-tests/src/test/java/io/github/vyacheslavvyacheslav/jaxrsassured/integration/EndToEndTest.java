@@ -145,12 +145,17 @@ class EndToEndTest {
 
     @Test
     void typedLocatorParamIsOverriddenBySetPathParam() {
-        // id в спеке — number: локатор принимает Integer
+        // id в спеке — number: локатор принимает Number
         StoreResource store = api.getStoresResource().getStoreResource(3);
 
         List<Book> books = store.getBooksResource().findAll(BookFormat.E_BOOK);
         assertEquals("/api/v1/stores/3/books?format=e_book", lastUri);
         assertEquals("Мастер и Маргарита", books.get(0).getTitle());
+
+        // number из DTO — Double: в путь уходит 3, а не 3.0
+        Double storeIdFromDto = 3.0;
+        api.getStoresResource().getStoreResource(storeIdFromDto).getBooksResource().findAll(null);
+        assertEquals("/api/v1/stores/3/books", lastUri);
 
         // негативная проверка: в путь уходит то, что Integer не пропустил бы
         store.getBooksResource()

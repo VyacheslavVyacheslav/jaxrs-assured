@@ -9,6 +9,7 @@ import org.jboss.resteasy.client.jaxrs.internal.ClientWebTarget;
 import org.jboss.resteasy.client.jaxrs.internal.proxy.ClientInvoker;
 import org.jboss.resteasy.client.jaxrs.internal.proxy.ClientInvokerFactory;
 import org.jboss.resteasy.util.IsHttpMethod;
+import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.parameters.DecimalParamConverterProvider;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.parameters.RequestConfigurationFilter;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.proxy.ClientProxyFactory;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.proxy.ExtendedClientProxyFactory;
@@ -23,7 +24,8 @@ import java.util.Set;
 
 /**
  * Target, на котором строятся прокси ресурсов: создает Assured-инвокеры и сам регистрирует RequestConfigurationFilter,
- * без которого настройка из ConfigurationResource не применяется к запросам.
+ * без которого настройка из ConfigurationResource не применяется к запросам, и DecimalParamConverterProvider —
+ * дробные числа в параметрах без «.0» и экспоненты.
  * Тип тела по умолчанию не задается: метод с телом обязан объявить @Consumes на себе или на интерфейсе.
  * Может нести отложенные значения параметров пути (withPathParams): так локаторы передают подресурсу свой адрес.
  */
@@ -37,19 +39,19 @@ public class AssuredClientWebTarget extends ClientWebTarget implements ClientInv
     protected AssuredClientWebTarget(ResteasyClient client, ClientConfiguration configuration) {
         super(client, configuration);
         this.pathParams = Map.of();
-        registerRequestConfigurationFilter();
+        registerCoreProviders();
     }
 
     public AssuredClientWebTarget(ResteasyClient client, String uri, ClientConfiguration configuration) throws IllegalArgumentException, NullPointerException {
         super(client, uri, configuration);
         this.pathParams = Map.of();
-        registerRequestConfigurationFilter();
+        registerCoreProviders();
     }
 
     public AssuredClientWebTarget(ResteasyClient client, URI uri, ClientConfiguration configuration) throws NullPointerException {
         super(client, uri, configuration);
         this.pathParams = Map.of();
-        registerRequestConfigurationFilter();
+        registerCoreProviders();
     }
 
     public AssuredClientWebTarget(ResteasyClient client, UriBuilder uriBuilder, ClientConfiguration configuration) throws NullPointerException {
@@ -60,7 +62,7 @@ public class AssuredClientWebTarget extends ClientWebTarget implements ClientInv
                                    Map<String, Object> pathParams) {
         super(client, uriBuilder, configuration);
         this.pathParams = pathParams;
-        registerRequestConfigurationFilter();
+        registerCoreProviders();
     }
 
     /**
@@ -125,11 +127,15 @@ public class AssuredClientWebTarget extends ClientWebTarget implements ClientInv
     }
 
     /**
-     * Дочерние target (path, resolveTemplate) получают копию конфигурации — фильтр в ней уже есть.
+     * Фильтр настройки запроса и конвертер дробных чисел в параметрах. Дочерние target (path, resolveTemplate)
+     * получают копию конфигурации — в ней они уже есть.
      */
-    private void registerRequestConfigurationFilter() {
+    private void registerCoreProviders() {
         if (!getConfiguration().isRegistered(RequestConfigurationFilter.class)) {
             register(RequestConfigurationFilter.class);
+        }
+        if (!getConfiguration().isRegistered(DecimalParamConverterProvider.class)) {
+            register(DecimalParamConverterProvider.class);
         }
     }
 }

@@ -155,7 +155,7 @@ class ResourceModelBuilderTest {
         ResourceModelBuilder builder = new ResourceModelBuilder(CONFIG, new SchemaTypes(CONFIG, spec));
         List<ResourceModel> models = builder.build(PathTree.of(spec));
 
-        assertEquals("java.lang.Integer",
+        assertEquals("java.lang.Number",
                 locator(byName(models, "BooksResource"), "getBookResource").pathParamType().toString());
         assertEquals("gen.model.BookFormat",
                 locator(byName(models, "FormatsResource"), "getFormatResource").pathParamType().toString());
@@ -182,9 +182,30 @@ class ResourceModelBuilderTest {
         assertEquals("java.lang.String",
                 locator(byName(models, "OrdersResource"), "getOrderResource").pathParamType().toString());
         assertTrue(builder.warnings().stream().anyMatch(w -> w.contains("{id}")
-                        && w.contains("Integer: GET /api/v1/orders/{id}")
+                        && w.contains("Number: GET /api/v1/orders/{id}")
                         && w.contains("String: GET /api/v1/orders/{id}/receipt")),
                 builder.warnings().toString());
+    }
+
+    @Test
+    void locatorParamOfDifferentNumericTypesIsNumber() {
+        // integer в одной ручке, number в другой — не ошибка спеки: Number принимает оба
+        OpenAPI spec = new OpenAPI().paths(new Paths()
+                .addPathItem("/api/v1/orders/{id}", new PathItem().get(new Operation()
+                        .operationId("OrdersController_findOne")
+                        .addParametersItem(pathParam("id", new IntegerSchema()))
+                        .responses(responses200())))
+                .addPathItem("/api/v1/orders/{id}/receipt", new PathItem().get(new Operation()
+                        .operationId("OrdersController_receipt")
+                        .addParametersItem(pathParam("id", new NumberSchema()))
+                        .responses(responses200()))));
+
+        ResourceModelBuilder builder = new ResourceModelBuilder(CONFIG, new SchemaTypes(CONFIG, spec));
+        List<ResourceModel> models = builder.build(PathTree.of(spec));
+
+        assertEquals("java.lang.Number",
+                locator(byName(models, "OrdersResource"), "getOrderResource").pathParamType().toString());
+        assertEquals(List.of(), builder.warnings());
     }
 
     @Test

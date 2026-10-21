@@ -82,12 +82,12 @@ class GeneratedCodeTest {
 
     @Test
     void booksFollowSpec() throws Exception {
-        Method findAll = BooksResource.class.getMethod("findAll", Integer.class, Integer.class, Integer.class, String.class);
+        Method findAll = BooksResource.class.getMethod("findAll", Number.class, Number.class, Number.class, String.class);
         assertEquals(List.of("query:page", "query:limit", "query:authorId", "query:genre"), params(findAll));
         assertEquals(BASE + ".model.PageDto<" + BASE + ".model.Book>", findAll.getGenericReturnType().getTypeName());
 
-        // лист {id} инлайнится в BooksResource; number без format в пути — Integer, а не Double
-        Method findOne = BooksResource.class.getMethod("findOne", Integer.class);
+        // лист {id} инлайнится в BooksResource; number без format в параметре — Number: и целое, и дробное
+        Method findOne = BooksResource.class.getMethod("findOne", Number.class);
         assertEquals("{id}", findOne.getAnnotation(Path.class).value());
         assertEquals(List.of("path:id"), params(findOne));
         assertEquals(Book.class, findOne.getReturnType());
@@ -95,8 +95,8 @@ class GeneratedCodeTest {
         Method create = BooksResource.class.getMethod("create", CreateBookDto.class);
         assertArrayEquals(new String[]{"application/json"}, create.getAnnotation(Consumes.class).value());
         assertEquals(Book.class, create.getReturnType());
-        assertEquals(void.class, BooksResource.class.getMethod("remove", Integer.class).getReturnType());
-        assertEquals(Book.class, BooksResource.class.getMethod("patch", Integer.class, PatchBookDto.class).getReturnType());
+        assertEquals(void.class, BooksResource.class.getMethod("remove", Number.class).getReturnType());
+        assertEquals(Book.class, BooksResource.class.getMethod("patch", Number.class, PatchBookDto.class).getReturnType());
 
         // статический ребёнок — подресурс
         Method snapshots = BooksResource.class.getMethod("getSnapshotsResource");
@@ -123,8 +123,8 @@ class GeneratedCodeTest {
                 AuthorsResource.class.getMethod("getAuthorIdResource", String.class).getReturnType());
         assertEquals(AuthorIdBooksResource.class, AuthorIdResource.class.getMethod("getBooksResource").getReturnType());
 
-        // тип параметра локатора — из ручек поддерева: number без format — Integer, как у инлайнового findOne
-        Method store = StoresResource.class.getMethod("getStoreResource", Integer.class);
+        // тип параметра локатора — из ручек поддерева: number без format — Number, как у инлайнового findOne
+        Method store = StoresResource.class.getMethod("getStoreResource", Number.class);
         assertEquals(List.of("path:id"), params(store));
         assertEquals(StoreBooksResource.class, StoreResource.class.getMethod("getBooksResource").getReturnType());
 
@@ -157,7 +157,7 @@ class GeneratedCodeTest {
         assertEquals(String.class, receipt.getReturnType());
         assertProduces("text/html", receipt);
 
-        assertNull(BooksResource.class.getMethod("findOne", Integer.class).getAnnotation(Produces.class),
+        assertNull(BooksResource.class.getMethod("findOne", Number.class).getAnnotation(Produces.class),
                 "JSON — умолчание, без @Produces");
     }
 

@@ -29,7 +29,8 @@ import java.util.Set;
  *         сегмент-параметр {id} → Pascal(singular(родительского сегмента)); прочие параметры ({locationId})
  *         → Pascal(параметра) — у узла бывает несколько параметризованных потомков;</li>
  *     <li>{param} без детей — ручки инлайнятся в родительский интерфейс с @Path("{param}");</li>
- *     <li>{param} с детьми — локатор с @PathParam; тип — общий для ручек поддерева, при расхождении String;</li>
+ *     <li>{param} с детьми — локатор с @PathParam; тип — общий для ручек поддерева (разные числовые — Number),
+ *         при расхождении String;</li>
  *     <li>имя метода — operationId без префикса контроллера ("XxxController_findOne" → findOne),
  *         при коллизии в интерфейсе — полный operationId;</li>
  *     <li>ответ — первый media type минимального 2xx: text/event-stream → InputStream (поток не кончается,
@@ -42,6 +43,9 @@ final class ResourceModelBuilder {
     private static final Set<String> SUPPORTED_HTTP = Set.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS");
     private static final TypeName INPUT_STREAM = ClassName.get(InputStream.class);
     private static final TypeName STRING = ClassName.get(String.class);
+    /** Числовые типы параметров: у локатора их смесь сводится к Number. */
+    private static final Set<TypeName> NUMERIC = Set.of(TypeName.INT.box(), TypeName.LONG.box(),
+            TypeName.DOUBLE.box(), TypeName.FLOAT.box(), SchemaTypes.NUMBER);
 
     private final GenConfig config;
     private final SchemaTypes types;
@@ -153,14 +157,18 @@ final class ResourceModelBuilder {
 
     /**
      * Тип параметра локатора {param}. В OpenAPI тип параметра пути объявляет каждая ручка, а локатор обслуживает
-     * все ручки своего поддерева: тип берётся, если все объявившие его ручки согласны (number → Integer,
-     * $ref на энум → энум — как у параметров ручек). Разошлись — String и WARN; ни одна не объявила — String.
+     * все ручки своего поддерева: тип берётся, если все объявившие его ручки согласны (number → Number,
+     * $ref на энум → энум — как у параметров ручек). Разные числовые (integer в одной ручке, number в другой) —
+     * Number: он принимает любое из них. Разошлись иначе — String и WARN; ни одна не объявила — String.
      */
     private TypeName locatorParamType(PathTree.Node node, String param) {
         Map<TypeName, List<String>> declared = new LinkedHashMap<>();
         collectPathParamTypes(node, param, declared);
         if (declared.size() == 1) {
             return declared.keySet().iterator().next();
+        }
+        if (declared.size() > 1 && NUMERIC.containsAll(declared.keySet())) {
+            return SchemaTypes.NUMBER;
         }
         if (declared.size() > 1) {
             List<String> variants = new ArrayList<>();

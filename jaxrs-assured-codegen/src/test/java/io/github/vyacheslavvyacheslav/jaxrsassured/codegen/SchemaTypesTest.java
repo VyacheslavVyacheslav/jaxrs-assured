@@ -155,17 +155,20 @@ class SchemaTypesTest {
     }
 
     @Test
-    void numberParamsStayInteger() {
+    void numberParamsBecomeNumber() {
         SchemaTypes types = new SchemaTypes(CONFIG, new OpenAPI());
 
-        // параметр уходит в URL через toString(): Double дал бы /drivers/1.0 и ?limit=20.0
-        assertEquals("java.lang.Integer", types.paramType(new NumberSchema()).toString());
-        assertEquals("java.util.List<java.lang.Integer>",
+        // number без format бывает и целым (page, id), и дробным (метры): Number примет и 20, и 2.5
+        assertEquals("java.lang.Number", types.paramType(new NumberSchema()).toString());
+        // List<Number> не принял бы переменную List<Integer>
+        assertEquals("java.util.List<? extends java.lang.Number>",
                 types.paramType(new ArraySchema().items(new NumberSchema())).toString());
         // явный format в спеке сильнее
         assertEquals("java.lang.Double", types.paramType(new NumberSchema().format("double")).toString());
         assertEquals("java.lang.Long", types.paramType(new NumberSchema().format("int64")).toString());
         assertEquals("java.lang.Integer", types.paramType(new IntegerSchema()).toString());
+        assertEquals("java.util.List<java.lang.Integer>",
+                types.paramType(new ArraySchema().items(new IntegerSchema())).toString());
         assertEquals("java.lang.String", types.paramType(new StringSchema()).toString());
     }
 

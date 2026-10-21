@@ -23,7 +23,7 @@ books.assured(r -> r.findOne(404))                                  // тот ж
         .body("code", equalTo("NOT_FOUND"));
 
 books.assured(r -> r.setQueryParam("limit", "abc").findAll(1, 20, null, null))
-        .statusCode(400);                                           // строка вместо Integer — в обход типов
+        .statusCode(400);                                           // строка вместо числа — в обход типов
 ```
 
 Интерфейсы и DTO можно написать руками или сгенерировать из OpenAPI-спеки — генератор входит в проект.
@@ -239,8 +239,8 @@ DTO, и проверки ответа.
 
 ```java
 // только для одного вызова — внутри assured(...)
-books.assured(r -> r.setQueryParam("limit", "abc").findAll(1, 20, null, null)).statusCode(400);     // строка вместо Integer
-books.assured(r -> r.setPathParam("id", "abc").findOne(7)).statusCode(400);                         // строка вместо Integer в пути
+books.assured(r -> r.setQueryParam("limit", "abc").findAll(1, 20, null, null)).statusCode(400);     // строка вместо числа
+books.assured(r -> r.setPathParam("id", "abc").findOne(7)).statusCode(400);                         // строка вместо числа в пути
 books.assured(r -> r.deleteQueryParam("page").findAll(1, 20, null, null)).statusCode(400);          // без обязательного параметра
 books.assured(r -> r.setBody("{\"price\": \"free\"}").patch(7, new PatchBookDto())).statusCode(400); // битый JSON вместо DTO
 books.assured(r -> r.setCookie("session", "expired").findOne(7)).statusCode(401);                   // просроченная сессия
@@ -436,6 +436,10 @@ public interface BooksResource extends ConfigurationResource<BooksResource> {
 - Class-level `@Path` — только у корня; подресурсы получают путь от `@Path` на методе-локаторе.
 - Метод с телом (`POST`/`PUT`/`PATCH`) обязан объявить `@Consumes` — на методе или интерфейсе; без него ресурс
   не построится (`RESTEASY004590`). Из `@Consumes` берётся только первое значение.
+- Дробные числа в параметрах (query, path, header, cookie, значения локаторов) уходят без лишнего:
+  `42.0` → `42`, `1.0E-4` → `0.0001`, `BigDecimal 2.50` → `2.5`. Так `id` из DTO, где `number` стал `Double`, можно
+  передать в следующий вызов как есть. Целые, `NaN` и бесконечности не меняются. Числа в `setHeader` идут так же,
+  а `setQueryParam` значение не конвертирует — оно уходит строкой как есть.
 
 ## Настройка запроса: заголовки, cookie, параметры, тело
 
@@ -464,9 +468,9 @@ books.reset();                             // снять все настройк
 Главное применение — негативные проверки того, что не пропускают типизированные параметры:
 
 ```java
-books.assured(r -> r.setQueryParam("limit", "abc").findAll(1, 20, null, null)).statusCode(400);  // строка вместо Integer
+books.assured(r -> r.setQueryParam("limit", "abc").findAll(1, 20, null, null)).statusCode(400);  // строка вместо числа
 books.assured(r -> r.deleteQueryParam("page").findAll(1, 20, null, null)).statusCode(400);       // без обязательного параметра
-books.assured(r -> r.setPathParam("id", "abc").findOne(7)).statusCode(400);                      // строка вместо Integer в пути
+books.assured(r -> r.setPathParam("id", "abc").findOne(7)).statusCode(400);                      // строка вместо числа в пути
 books.assured(r -> r.setCookie("session", "expired").findOne(7)).statusCode(401);
 books.assured(r -> r.setBody("{\"price\": \"free\"}").patch(7, new PatchBookDto())).statusCode(400);  // битый JSON вместо DTO
 ```
@@ -616,9 +620,10 @@ Main <spec> <outDir> <basePackage> [флаги]      — генерация ис
 ```
 
 - `{param}` без детей инлайнится в родителя: `@Path("{id}")` + `@PathParam`.
-- `{param}` с детьми — свой интерфейс за локатором: `StoreResource getStoreResource(@PathParam("id") Integer id)`.
-  Тип параметра локатора берётся из ручек поддерева по тем же правилам, что у параметров ручек (`number` → `Integer`,
-  `$ref` на энум → энум). Если ручки объявили его по-разному — `String` и WARN со списком расхождений.
+- `{param}` с детьми — свой интерфейс за локатором: `StoreResource getStoreResource(@PathParam("id") Number id)`.
+  Тип параметра локатора берётся из ручек поддерева по тем же правилам, что у параметров ручек (`number` → `Number`,
+  `$ref` на энум → энум); разные числовые (`integer` в одной ручке, `number` в другой) — `Number`. Если ручки
+  объявили его по-разному иначе — `String` и WARN со списком расхождений.
 - Имя метода — operationId без префикса контроллера (`BooksController_findOne` → `findOne`).
 - Имя java-параметра сохраняет горбы (`X-Request-Id` → `xRequestId`); совпавшие в методе имена разводятся
   суффиксом: header `last-event-id` + query `lastEventId` → `lastEventId`, `lastEventIdQuery`.
@@ -645,9 +650,9 @@ SSE-вызов возвращается сразу, события читают�
 | `string` (включая date-time) | `String` |
 | `integer` / `int64` | `Integer` / `Long` |
 | `number` без format, `double`, `float` | `Double` — дробь не теряется |
-| `number` в query/path/header-параметре и у локатора | `Integer` — в URL уходит через `toString()`, `Double` дал бы `?limit=20.0` |
+| `number` без format в query/path/header-параметре и у локатора | `Number` — `number` бывает и целым (`page`, `id`), и дробным (метры, проценты): принимает и `20`, и `2.5`, и `79991234567L` |
 | `boolean` | `Boolean` |
-| `array` | `List<тип items>` |
+| `array` | `List<тип items>`; массив `number` в параметре — `List<? extends Number>` (примет и `List<Integer>`) |
 | `$ref` на схему; `allOf [$ref X]` без своих свойств (ссылка с `description`/`nullable`) | DTO `X` |
 | энум (`enum` схемы или свойства) | Java-энум: константы `E_BOOK`, исходное значение `e_book` — в JSON (`@JsonValue`/`@JsonCreator`) и в URL (`toString()`) |
 | `$ref` на энум в query/path/header-параметре и у локатора | тот же энум; в URL уходит значение из спеки: `format=e_book`, а не `E_BOOK` |
@@ -655,7 +660,8 @@ SSE-вызов возвращается сразу, события читают�
 | `object` без свойств, `anyOf`/`oneOf`, наследование через `allOf` | `JsonNode` (+ WARN) |
 
 Целые по смыслу поля, объявленные как `number` (`total`, `page`), тоже становятся `Double` — лечится в спеке:
-`@ApiProperty({ type: 'integer' })`.
+`@ApiProperty({ type: 'integer' })`. Такой `Double` можно сразу передать в параметр `Number`: core отправит
+`42.0` как `42` (см. [Интерфейсы ресурсов](#интерфейсы-ресурсов)).
 
 ### Постраничные выборки
 
