@@ -17,7 +17,7 @@ import java.util.regex.PatternSyntaxException;
  *     <li>{@code Main <spec>} — печать дерева путей (проверка парсинга и группировки);</li>
  *     <li>{@code Main <spec> <outDir> <basePackage> [--root api/v1] [--root-name V1Resource]
  *         [--ignore <regex>]... [--ignore-header имя]... [--super-interface полный.Класс]
- *         [--import Схема=полный.класс]... [--lombok]
+ *         [--import Схема=полный.класс]... [--type-override Схема.поле=Тип]... [--lombok]
  *         [--split-model [--model-package Схема=группа]...]}
  *         — генерация исходников;</li>
  *     <li>{@code Main --help} — справка.</li>
@@ -42,6 +42,9 @@ public final class Main {
               --super-interface полный.Класс   супер-интерфейс ресурсов, параметризуется самим
                                                интерфейсом: Класс<Ресурс> (по умолчанию нет)
               --import Схема=полный.Класс      схему не генерировать, ссылки типировать классом (повторяемый)
+              --type-override Схема.поле=Тип   тип числового поля DTO: Integer, Long, Double, BigDecimal;
+                                               * — любые символы: *.id=Long, PageDto.*=Integer; из совпавших
+                                               действует последнее (повторяемый)
               --lombok                         DTO на аннотациях Lombok (API тот же; Lombok нужен проекту)
               --split-model                    DTO по подпакетам групп путей: model.<группа>, как resources;
                                                общие для нескольких групп — в корне model
@@ -107,6 +110,7 @@ public final class Main {
         boolean splitModel = false;
         List<Pattern> ignore = new ArrayList<>();
         Set<String> ignoreHeaders = new LinkedHashSet<>();
+        List<TypeOverrideRule> typeOverrides = new ArrayList<>();
         Map<String, String> importMappings = new LinkedHashMap<>();
         Map<String, String> modelPackages = new LinkedHashMap<>();
         for (int i = 3; i < args.length; i++) {
@@ -125,6 +129,13 @@ public final class Main {
                     superInterface = value(args, ++i, "--super-interface");
                     if (!superInterface.contains(".") || !Naming.isQualifiedName(superInterface)) {
                         throw new CliException("Ожидался --super-interface полный.Класс: " + superInterface);
+                    }
+                }
+                case "--type-override" -> {
+                    try {
+                        typeOverrides.add(TypeOverrideRule.parse(value(args, ++i, "--type-override")));
+                    } catch (IllegalArgumentException e) {
+                        throw new CliException("--type-override: " + e.getMessage());
                     }
                 }
                 case "--lombok" -> lombok = true;
@@ -150,7 +161,8 @@ public final class Main {
             throw new CliException("--model-package работает только вместе с --split-model");
         }
         GenConfig config = new GenConfig(specFile, outDir, basePackage, rootPath, rootClassName,
-                ignore, superInterface, importMappings, lombok, splitModel, modelPackages, ignoreHeaders);
+                ignore, superInterface, importMappings, lombok, splitModel, modelPackages, ignoreHeaders,
+                typeOverrides);
         Generator.GenerationResult result = Generator.run(config);
         out.printf("Сгенерировано интерфейсов: %d, DTO: %d → %s%n",
                 result.interfaces(), result.dtos(), outDir);

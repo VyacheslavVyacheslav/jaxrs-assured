@@ -99,7 +99,9 @@ class EndToEndTest {
         PageDto<Book> page = api.getBooksResource().findAll(1, 20, null, "FICTION");
 
         assertEquals("Мастер и Маргарита", page.getData().get(0).getTitle());
-        assertEquals(1.0, page.getTotal());
+        // total в спеке — number, typeOverrides PageDto.*=Integer в execution e2e делает его Integer
+        assertEquals(Integer.valueOf(1), page.getTotal());
+        assertEquals(Double.valueOf(12.5), page.getData().get(0).getPrice(), "Дробное поле без правила — Double");
         Map<String, String> query = query(lastUri);
         assertEquals(Map.of("page", "1", "limit", "20", "genre", "FICTION"), query, "null-параметр не уходит");
     }

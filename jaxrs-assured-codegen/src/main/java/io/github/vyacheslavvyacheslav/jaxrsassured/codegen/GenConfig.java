@@ -19,17 +19,29 @@ import java.util.stream.Collectors;
  * схема → группа, закрепляет пакет вручную ("" — корень model), только вместе со splitModel.
  * ignoreHeaders — заголовки, которые не становятся параметрами методов: их ставят фильтры клиента
  * (Authorization — BearerAuthFilter) или setHeader. Имена без учета регистра, как в HTTP.
+ * typeOverrides — переопределения типов числовых полей DTO ({@code *.id=Long}, см. TypeOverrideRule); порядок важен:
+ * из совпавших правил действует последнее.
  */
 public record GenConfig(Path specFile, Path outDir, String basePackage, String rootPath,
                         String rootClassName, List<Pattern> ignorePaths, String superInterface,
                         Map<String, String> importMappings, boolean lombok, boolean splitModel,
-                        Map<String, String> modelPackages, Set<String> ignoreHeaders) {
+                        Map<String, String> modelPackages, Set<String> ignoreHeaders,
+                        List<TypeOverrideRule> typeOverrides) {
 
     public GenConfig {
         ignorePaths = List.copyOf(ignorePaths);
         importMappings = Map.copyOf(importMappings);
         modelPackages = Map.copyOf(modelPackages);
         ignoreHeaders = ignoreHeaders.stream().map(GenConfig::headerKey).collect(Collectors.toUnmodifiableSet());
+        typeOverrides = List.copyOf(typeOverrides);
+    }
+
+    /** Без переопределения типов. */
+    public GenConfig(Path specFile, Path outDir, String basePackage, String rootPath, String rootClassName,
+                     List<Pattern> ignorePaths, String superInterface, Map<String, String> importMappings,
+                     boolean lombok, boolean splitModel, Map<String, String> modelPackages, Set<String> ignoreHeaders) {
+        this(specFile, outDir, basePackage, rootPath, rootClassName, ignorePaths, superInterface, importMappings,
+                lombok, splitModel, modelPackages, ignoreHeaders, List.of());
     }
 
     /** Без пропуска заголовков. */

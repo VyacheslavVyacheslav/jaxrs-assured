@@ -9,7 +9,9 @@ import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.media.Schema;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -20,15 +22,24 @@ import java.util.Set;
  * энумами POJO; обёртка выборки (PageDto) — дженериком PageDto&lt;T&gt; с полем List&lt;T&gt; data.
  * Схемы из importMappings и нестандартные (free-form, без свойств)
  * не генерируются — их резолвинг SchemaTypes уводит в JsonNode.
+ * Тип числового поля можно переопределить правилом typeOverrides ({@code *.id=Long}).
  */
 final class DtoModelBuilder {
 
     private final SchemaTypes types;
+    private final List<TypeOverrideRule> overrides;
+    /** Правила, примененные хотя бы к одному полю: остальные — повод для WARN (опечатка или перекрыты ниже). */
+    private final Set<TypeOverrideRule> usedOverrides = Collections.newSetFromMap(new IdentityHashMap<>());
     private final List<String> warnings = new ArrayList<>();
 
-    /** Пакеты классов и типы полей берёт у SchemaTypes — одна таблица на классы и ссылки. */
     DtoModelBuilder(SchemaTypes types) {
+        this(types, List.of());
+    }
+
+    /** Пакеты классов и типы полей берёт у SchemaTypes — одна таблица на классы и ссылки. */
+    DtoModelBuilder(SchemaTypes types, List<TypeOverrideRule> overrides) {
         this.types = types;
+        this.overrides = List.copyOf(overrides);
     }
 
     List<String> warnings() {
@@ -48,7 +59,40 @@ final class DtoModelBuilder {
                     ? enumOf(entry.getKey(), entry.getValue())
                     : objectOf(entry.getKey(), entry.getValue()));
         }
+        for (TypeOverrideRule rule : overrides) {
+            if (!usedOverrides.contains(rule)) {
+                warnings.add("Правило " + rule + " из typeOverrides (--type-override) не применилось ни к одному "
+                        + "числовому полю DTO: нет совпадений или его перекрыли правила ниже");
+            }
+        }
         return models;
+    }
+
+    /**
+     * Тип из typeOverrides для числового свойства (у массива чисел — для элементов); из совпавших правил — последнее.
+     * null — правила нет или свойство не числовое.
+     */
+    private TypeName overriddenType(String className, String jsonName, Schema<?> property) {
+        boolean array = "array".equals(property.getType());
+        if (!isNumeric(array ? property.getItems() : property)) {
+            return null;
+        }
+        TypeOverrideRule rule = null;
+        for (TypeOverrideRule candidate : overrides) {
+            if (candidate.matches(className, jsonName)) {
+                rule = candidate;
+            }
+        }
+        if (rule == null) {
+            return null;
+        }
+        usedOverrides.add(rule);
+        return array ? ParameterizedTypeName.get(ClassName.get(List.class), rule.type()) : rule.type();
+    }
+
+    private static boolean isNumeric(Schema<?> schema) {
+        return schema != null && schema.get$ref() == null && (schema.getEnum() == null || schema.getEnum().isEmpty())
+                && ("number".equals(schema.getType()) || "integer".equals(schema.getType()));
     }
 
     private boolean isPureEnum(Schema<?> schema) {
@@ -99,7 +143,8 @@ final class DtoModelBuilder {
                     fieldType = array ? ParameterizedTypeName.get(ClassName.get(List.class), enumType) : enumType;
                 }
             } else {
-                fieldType = types.fieldType(property);
+                TypeName overridden = overriddenType(className, jsonName, property);
+                fieldType = overridden != null ? overridden : types.fieldType(property);
             }
             fields.add(new FieldModel(jsonName, varName, fieldType, required.contains(jsonName),
                     property.getDescription()));

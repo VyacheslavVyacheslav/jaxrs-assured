@@ -79,6 +79,15 @@ public class GenerateMojo extends AbstractMojo {
     @Parameter(property = "jaxrsassured.superInterface")
     String superInterface;
 
+    /**
+     * Тип числового поля DTO (флаг --type-override): {@code <typeOverrides><typeOverride>*.id=Long</typeOverride>...}.
+     * Типы: Integer, Long, Double, BigDecimal; {@code *} — любые символы; из совпавших правил действует последнее.
+     * Класс правила называется TypeOverrideRule не случайно: элемент {@code <typeOverride>} Maven пытается создать
+     * как класс TypeOverride из пакета плагина, если такой есть, — и падает вместо того, чтобы взять строку.
+     */
+    @Parameter
+    List<String> typeOverrides;
+
     /** Схема → внешний класс, схема не генерируется (флаг --import): {@code <PageDto>com.example.Page</PageDto>}. */
     @Parameter
     Map<String, String> importMappings;
@@ -156,6 +165,14 @@ public class GenerateMojo extends AbstractMojo {
             }
             headers.add(name);
         }
+        List<TypeOverrideRule> overrides = new ArrayList<>();
+        for (String rule : typeOverrides == null ? List.<String>of() : typeOverrides) {
+            try {
+                overrides.add(TypeOverrideRule.parse(rule));
+            } catch (IllegalArgumentException e) {
+                throw new MojoExecutionException("codegen: typeOverrides: " + e.getMessage(), e);
+            }
+        }
         Map<String, String> mappings = importMappings == null ? Map.of() : importMappings;
         for (Map.Entry<String, String> mapping : mappings.entrySet()) {
             if (!Naming.isIdentifier(mapping.getKey()) || !mapping.getValue().contains(".")
@@ -180,6 +197,6 @@ public class GenerateMojo extends AbstractMojo {
             throw new MojoExecutionException("codegen: modelPackages работает только вместе со splitModel");
         }
         return new GenConfig(spec.toPath(), outputDirectory.toPath(), basePackage, rootPath, rootName,
-                ignore, superInterface, mappings, lombok, splitModel, pins, headers);
+                ignore, superInterface, mappings, lombok, splitModel, pins, headers, overrides);
     }
 }

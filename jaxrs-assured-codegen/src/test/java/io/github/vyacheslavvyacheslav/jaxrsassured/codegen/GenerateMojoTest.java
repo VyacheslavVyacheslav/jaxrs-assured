@@ -35,7 +35,7 @@ class GenerateMojoTest {
                     "responses": {"200": {"description": "ok"}}}}
               },
               "components": {"schemas": {
-                "DriverDto": {"type": "object", "properties": {"name": {"type": "string"}}}
+                "DriverDto": {"type": "object", "properties": {"name": {"type": "string"}, "rating": {"type": "number"}}}
               }}
             }
             """;
@@ -109,6 +109,19 @@ class GenerateMojoTest {
     }
 
     @Test
+    void typeOverridesReachGenerator() throws Exception {
+        GenerateMojo mojo = mojo();
+        Path dto = mojo.outputDirectory.toPath().resolve("gen/test/model/DriverDto.java");
+
+        mojo.execute();
+        assertTrue(Files.readString(dto).contains("private Double rating;"));
+
+        mojo.typeOverrides = List.of("DriverDto.rating=Integer");
+        mojo.execute();
+        assertTrue(Files.readString(dto).contains("private Integer rating;"));
+    }
+
+    @Test
     void splitModelAndPins() throws Exception {
         GenerateMojo mojo = mojo();
         mojo.splitModel = true;
@@ -144,6 +157,10 @@ class GenerateMojoTest {
         GenerateMojo badHeader = mojo();
         badHeader.ignoreHeaders = List.of("X Actor");
         assertThrows(MojoExecutionException.class, badHeader::execute);
+
+        GenerateMojo badOverride = mojo();
+        badOverride.typeOverrides = List.of("DriverDto.rating");
+        assertThrows(MojoExecutionException.class, badOverride::execute);
 
         GenerateMojo badSuper = mojo();
         badSuper.superInterface = "Base";

@@ -127,6 +127,39 @@ class MainTest {
     }
 
     @Test
+    void badTypeOverrideIsUsageError() throws Exception {
+        Run run = run(writeSpec("spec.json", SPEC),
+                tempDir.resolve("out").toString(), "gen.test", "--type-override", "*.id=Number");
+        assertEquals(2, run.code());
+        assertTrue(run.stderr().contains("--type-override"));
+    }
+
+    @Test
+    void typeOverrideChangesNumericDtoField() throws Exception {
+        String spec = writeSpec("spec-numbers.json", """
+                {
+                  "openapi": "3.0.0",
+                  "info": {"title": "t", "version": "1.0"},
+                  "paths": {
+                    "/api/v1/routes": {"get": {"operationId": "RoutesController_findAll",
+                        "responses": {"200": {"description": "ok"}}}}
+                  },
+                  "components": {"schemas": {
+                    "RouteDto": {"type": "object", "properties": {
+                      "id": {"type": "number"}, "lat": {"type": "number"}}}
+                  }}
+                }
+                """);
+        Path outDir = tempDir.resolve("out");
+
+        assertEquals(0, run(spec, outDir.toString(), "gen.test", "--type-override", "*.id=Long").code());
+
+        String dto = Files.readString(outDir.resolve("gen/test/model/RouteDto.java"));
+        assertTrue(dto.contains("private Long id;"), dto);
+        assertTrue(dto.contains("private Double lat;"), dto);
+    }
+
+    @Test
     void blankOrMalformedBasePackageIsUsageError() throws Exception {
         String spec = writeSpec("spec.json", SPEC);
         String outDir = tempDir.resolve("out").toString();

@@ -118,6 +118,11 @@
                             <outputDirectory>${project.build.directory}/generated-test-sources/e2e</outputDirectory>
                             <basePackage>io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e</basePackage>
                             <superInterface>io.github.vyacheslavvyacheslav.jaxrsassured.core.clients.ConfigurationResource</superInterface>
+                            <!-- целые по смыслу number-поля — Integer; дробный Book.price остается Double -->
+                            <typeOverrides>
+                                <typeOverride>PageDto.*=Integer</typeOverride>
+                                <typeOverride>ApiErrorDto.status=Integer</typeOverride>
+                            </typeOverrides>
                         </configuration>
                     </execution>
                 </executions>

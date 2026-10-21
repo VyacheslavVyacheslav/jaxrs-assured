@@ -595,6 +595,7 @@ Main <spec> <outDir> <basePackage> [флаги]      — генерация ис
 | `--ignore-header <имя>` | `ignoreHeaders` (`<ignoreHeader>`) | заголовок не становится параметром методов — его ставит фильтр (`BearerAuthFilter`) или `setHeader`; регистр не важен; имя, которого нет в спеке, — WARN |
 | `--super-interface полный.Класс` | `superInterface` | супер-интерфейс ресурсов: `XResource extends Класс<XResource>`; для core — `…core.clients.ConfigurationResource` |
 | `--import Схема=полный.Класс` | `importMappings` (`<Схема>класс</Схема>`) | схему не генерировать, ссылки типировать указанным классом |
+| `--type-override Схема.поле=Тип` | `typeOverrides` (`<typeOverride>`) | тип числового поля DTO: `Integer`, `Long`, `Double`, `BigDecimal`; `*` — любые символы (см. [Типы](#типы)) |
 | `--lombok` | `lombok` | DTO на аннотациях Lombok (см. [Два стиля DTO](#два-стиля-dto)) |
 | `--split-model` | `splitModel` | DTO по подпакетам групп путей (см. [Раскладка model](#раскладка-model-по-пакетам)) |
 | `--model-package Схема=группа` | `modelPackages` (`<Схема>группа</Схема>`) | закрепить пакет схемы при split-model; пустая группа — корень `model` |
@@ -666,9 +667,27 @@ SSE-вызов возвращается сразу, события читают�
 | `allOf [$ref PageDto, {data: array of $ref X}]` в ответе | `PageDto<X>` |
 | `object` без свойств, `anyOf`/`oneOf`, наследование через `allOf` | `JsonNode` (+ WARN) |
 
-Целые по смыслу поля, объявленные как `number` (`total`, `page`), тоже становятся `Double` — лечится в спеке:
-`@ApiProperty({ type: 'integer' })`. Такой `Double` можно сразу передать в параметр `Number`: core отправит
-`42.0` как `42` (см. [Интерфейсы ресурсов](#интерфейсы-ресурсов)).
+Целые по смыслу поля, объявленные как `number` (`id`, `total`, `page`), тоже становятся `Double`. Лучше всего это
+лечится в спеке (`@ApiProperty({ type: 'integer' })`), а пока ее не поправили — правилами `--type-override`:
+
+```xml
+<typeOverrides>
+    <typeOverride>*.id=Long</typeOverride>
+    <typeOverride>*.*Id=Long</typeOverride>
+    <typeOverride>PageDto.*=Integer</typeOverride>
+</typeOverrides>
+```
+
+- Правило — `Схема.поле=Тип`, `*` — любые символы; типы — `Integer`, `Long`, `Double`, `BigDecimal`.
+- Действует только на числовые поля (`number`, `integer`), у массива чисел — на элементы: строковый `id` правило
+  `*.id=Long` не тронет.
+- Из совпавших правил действует последнее — общие пишите раньше частных.
+- Правило, которое ни к чему не применилось (опечатка или его перекрыли ниже), — WARN.
+- Если поле на самом деле дробное, Jackson при чтении молча отбросит дробную часть (`ACCEPT_FLOAT_AS_INT`
+  включен по умолчанию) — переопределяйте только то, в чем уверены.
+
+`Double`, оставшийся без правила, можно сразу передать в параметр `Number`: core отправит `42.0` как `42`
+(см. [Интерфейсы ресурсов](#интерфейсы-ресурсов)).
 
 ### Постраничные выборки
 

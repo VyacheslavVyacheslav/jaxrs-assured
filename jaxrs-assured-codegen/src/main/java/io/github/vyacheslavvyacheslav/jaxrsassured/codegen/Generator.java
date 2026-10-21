@@ -32,7 +32,7 @@ public final class Generator {
         OpenAPI spec = SpecLoader.load(config.specFile());
         PathTree tree = PathTree.of(spec);
         SchemaTypes types = new SchemaTypes(config, spec);
-        DtoModelBuilder dtoBuilder = new DtoModelBuilder(types);
+        DtoModelBuilder dtoBuilder = new DtoModelBuilder(types, config.typeOverrides());
         List<DtoModel> dtos = dtoBuilder.build(spec);
         ResourceModelBuilder builder = new ResourceModelBuilder(config, types);
         List<ResourceModel> models = builder.build(tree);
