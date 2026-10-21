@@ -209,6 +209,37 @@ class ResourceModelBuilderTest {
     }
 
     @Test
+    void optionalBodyGetsOverloadWithoutBodyAndConsumes() {
+        Content anyJson = new Content().addMediaType("application/json",
+                new MediaType().schema(new ObjectSchema().additionalProperties(true)));
+        OpenAPI spec = new OpenAPI().paths(new Paths()
+                .addPathItem("/api/v1/orders/{id}/cancellations", new PathItem().post(new Operation()
+                        .operationId("OrdersController_cancel")
+                        .addParametersItem(pathParam("id", new StringSchema()))
+                        .requestBody(new RequestBody().required(false).content(anyJson))
+                        .responses(responses200())))
+                // required не указан — по стандарту OpenAPI это false
+                .addPathItem("/api/v1/orders/{id}/comments", new PathItem().post(new Operation()
+                        .operationId("OrdersController_comment")
+                        .addParametersItem(pathParam("id", new StringSchema()))
+                        .requestBody(new RequestBody().content(anyJson))
+                        .responses(responses200())))
+                .addPathItem("/api/v1/orders", new PathItem().post(new Operation()
+                        .operationId("OrdersController_create")
+                        .requestBody(new RequestBody().required(true).content(anyJson))
+                        .responses(responses200()))));
+
+        List<ResourceModel> models = new ResourceModelBuilder(CONFIG, new SchemaTypes(CONFIG, spec))
+                .build(PathTree.of(spec));
+
+        assertEquals(List.of("cancel(BODY) @Consumes(application/json)", "cancel()"),
+                signatures(byName(models, "OrderCancellationsResource")));
+        assertEquals(List.of("comment(BODY) @Consumes(application/json)", "comment()"),
+                signatures(byName(models, "OrderCommentsResource")));
+        assertEquals(List.of("create(BODY) @Consumes(application/json)"), signatures(byName(models, "OrdersResource")));
+    }
+
+    @Test
     void pathsOutsideRootAreRejected() {
         OpenAPI spec = new OpenAPI().paths(new Paths()
                 .addPathItem("/api/v1/drivers", new PathItem().get(new Operation().operationId("list")))
@@ -369,11 +400,20 @@ class ResourceModelBuilderTest {
                 .addPathItem("/api/v1/drivers", new PathItem().get(new Operation()
                         .operationId("DriversController_list")
                         .responses(new ApiResponses().addApiResponse("200", new ApiResponse()))))
+                // тело @Body() NestJS — required: true; без него по стандарту тело необязательно и будет перегрузка
                 .addPathItem("/api/v1/drivers/{id}/snapshots", new PathItem().post(new Operation()
                         .operationId("DriverSnapshotsController_sync")
-                        .requestBody(new RequestBody().content(new Content().addMediaType("application/json",
+                        .requestBody(new RequestBody().required(true).content(new Content().addMediaType("application/json",
                                 new MediaType().schema(new Schema<>().$ref("#/components/schemas/SyncDriversDto")))))
                         .responses(new ApiResponses().addApiResponse("202", new ApiResponse())))));
+    }
+
+    /** Ручки интерфейса коротко: имя(места параметров) и @Consumes. */
+    private static List<String> signatures(ResourceModel model) {
+        return model.operations().stream()
+                .map(o -> o.methodName() + "(" + String.join(",", o.params().stream().map(p -> p.in().name()).toList())
+                        + ")" + (o.consumes() == null ? "" : " @Consumes(" + o.consumes() + ")"))
+                .toList();
     }
 
     private static Parameter pathParam(String name, Schema<?> schema) {

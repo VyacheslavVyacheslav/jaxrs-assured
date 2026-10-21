@@ -209,6 +209,20 @@
         }
       }
     },
+    "/api/v1/orders/{id}/cancellations": {
+      "post": {
+        "operationId": "OrdersController_cancel",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {
+          "required": false,
+          "description": "Тела у действия нет; clientOperationId — ключ повтора. Необязательное тело — перегрузка без тела",
+          "content": {"application/json": {"schema": {"type": "object", "additionalProperties": true}}}
+        },
+        "responses": {
+          "202": {"description": "Отмена принята", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ActionAcceptedDto"}}}}
+        }
+      }
+    },
     "/api/v1/gift-cards": {
       "get": {
         "operationId": "GiftCardsController_findAll",

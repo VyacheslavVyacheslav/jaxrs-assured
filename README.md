@@ -627,7 +627,10 @@ Main <spec> <outDir> <basePackage> [флаги]      — генерация ис
 - Имя метода — operationId без префикса контроллера (`BooksController_findOne` → `findOne`).
 - Имя java-параметра сохраняет горбы (`X-Request-Id` → `xRequestId`); совпавшие в методе имена разводятся
   суффиксом: header `last-event-id` + query `lastEventId` → `lastEventId`, `lastEventIdQuery`.
-- Тело запроса → параметр-DTO + `@Consumes` (первый media type).
+- Тело запроса → параметр-DTO + `@Consumes` (первый media type). Необязательное тело (`requestBody.required: false`
+  или не указан — по стандарту OpenAPI это `false`) — ещё и перегрузка без тела и без `@Consumes`: рядом
+  с `cancel(JsonNode body)` — `cancel()`. Так запрос без тела уходит без `Content-Type`: RestEasy ставит его
+  по `@Consumes`, даже если передать `null`.
 - Перед записью удаляются только свои прошлые файлы — `.java` с пометкой «Сгенерировано jaxrs-assured-codegen»
   внутри папки `basePackage`; чужой файл на месте будущего исходника — ошибка до любых удалений.
 

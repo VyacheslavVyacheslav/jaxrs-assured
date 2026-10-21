@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.V1Resource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.model.ActionAcceptedDto;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.model.Address;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.model.ApiErrorDto;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.model.ArchiveRequestDto;
@@ -32,6 +33,7 @@ import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.c
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.catalog.CatalogResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.events.EventOrdersResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.giftcards.GiftCardsResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.orders.OrderCancellationsResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.orders.OrderReceiptResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.reports.ReportArchivesResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.reports.ReportFileResource;
@@ -104,6 +106,19 @@ class GeneratedCodeTest {
         assertEquals(BookSnapshotsResource.class, snapshots.getReturnType());
         assertEquals(SnapshotSyncResultDto.class,
                 BookSnapshotsResource.class.getMethod("sync", SyncBooksDto.class).getReturnType());
+    }
+
+    @Test
+    void optionalBodyHasOverloadWithoutBody() throws Exception {
+        // requestBody.required: false — метод с телом и перегрузка без тела и без @Consumes
+        Method withBody = OrderCancellationsResource.class.getMethod("cancel", JsonNode.class);
+        assertArrayEquals(new String[]{"application/json"}, withBody.getAnnotation(Consumes.class).value());
+        Method withoutBody = OrderCancellationsResource.class.getMethod("cancel");
+        assertNull(withoutBody.getAnnotation(Consumes.class), "Без тела — без @Consumes, Content-Type не уйдет");
+        assertEquals(ActionAcceptedDto.class, withoutBody.getReturnType());
+
+        // обязательное тело — без перегрузки
+        assertThrows(NoSuchMethodException.class, () -> BooksResource.class.getMethod("create"));
     }
 
     @Test

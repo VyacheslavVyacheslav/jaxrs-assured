@@ -33,6 +33,8 @@ import java.util.Set;
  *         при расхождении String;</li>
  *     <li>имя метода — operationId без префикса контроллера ("XxxController_findOne" → findOne),
  *         при коллизии в интерфейсе — полный operationId;</li>
+ *     <li>тело — параметр-DTO и @Consumes; необязательное тело (requestBody.required false или не указан —
+ *         по стандарту OpenAPI это false) — ещё и перегрузка без тела и без @Consumes;</li>
  *     <li>ответ — первый media type минимального 2xx: text/event-stream → InputStream (поток не кончается,
  *         String ждал бы его конца вечно), string/binary → byte[] (String испортил бы zip), иначе тип схемы;
  *         не-JSON ответ → @Produces с этим media type.</li>
@@ -229,6 +231,7 @@ final class ResourceModelBuilder {
                 continue;
             }
             List<ParamModel> params = paramsOf(operation, inlinePath, node);
+            List<ParamModel> withoutBody = uniqueVarNames(params);
             String mediaType = consumes(operation);
             if (mediaType != null) {
                 params = new ArrayList<>(params);
@@ -236,9 +239,15 @@ final class ResourceModelBuilder {
                         bodyType(operation, mediaType)));
             }
             Response response = response(operation, node);
-            result.add(new OperationModel(http, inlinePath == null ? "" : inlinePath,
-                    methodName(operation, http, node, usedNames), uniqueVarNames(params), mediaType,
+            String path = inlinePath == null ? "" : inlinePath;
+            String methodName = methodName(operation, http, node, usedNames);
+            result.add(new OperationModel(http, path, methodName, uniqueVarNames(params), mediaType,
                     response.produces(), response.type()));
+            if (mediaType != null && !Boolean.TRUE.equals(operation.getRequestBody().getRequired())) {
+                // тело необязательно: перегрузка без тела и без @Consumes — запрос без тела уйдёт без Content-Type
+                result.add(new OperationModel(http, path, methodName, withoutBody, null,
+                        response.produces(), response.type()));
+            }
         }
         return result;
     }
