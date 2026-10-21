@@ -11,6 +11,7 @@ import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.model.CreateB
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.model.Genre;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.model.PageDto;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.resources.books.BooksResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.resources.stores.StoreResource;
 import jakarta.ws.rs.NotFoundException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -67,6 +68,7 @@ class EndToEndTest {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/api/v1/books", this::books);
         server.createContext("/api/v1/authors", this::authorBooks);
+        server.createContext("/api/v1/stores", this::storeBooks);
         server.start();
         api = client.api("http://127.0.0.1:" + server.getAddress().getPort());
     }
@@ -142,6 +144,23 @@ class EndToEndTest {
     }
 
     @Test
+    void typedLocatorParamIsOverriddenBySetPathParam() {
+        // id в спеке — number: локатор принимает Integer
+        StoreResource store = api.getStoresResource().getStoreResource(3);
+
+        List<Book> books = store.getBooksResource().findAll(BookFormat.E_BOOK);
+        assertEquals("/api/v1/stores/3/books?format=e_book", lastUri);
+        assertEquals("Мастер и Маргарита", books.get(0).getTitle());
+
+        // негативная проверка: в путь уходит то, что Integer не пропустил бы
+        store.getBooksResource()
+                .assured(r -> r.setPathParam("id", "abc").findAll(null))
+                .statusCode(400)
+                .body("code", equalTo("VALIDATION_FAILED"));
+        assertEquals("/api/v1/stores/abc/books", lastUri);
+    }
+
+    @Test
     void bodyFromBuilderGoesAsJson() throws Exception {
         Book created = api.getBooksResource().create(CreateBookDto.builder()
                 .title("Новая книга")
@@ -178,6 +197,17 @@ class EndToEndTest {
             case "POST /api/v1/books" -> respond(exchange, 201,
                     "{\"id\": 100, \"title\": \"Новая книга\", \"price\": 9.99, \"format\": \"paperback\"}");
             default -> respond(exchange, 404, "{\"code\": \"NOT_FOUND\", \"message\": \"Книги нет\", \"status\": 404}");
+        }
+    }
+
+    /** GET /api/v1/stores/{id}/books — id только число, иначе 400. */
+    private void storeBooks(HttpExchange exchange) throws IOException {
+        lastUri = exchange.getRequestURI().toString();
+        String id = exchange.getRequestURI().getPath().split("/")[4];
+        if (id.matches("\\d+")) {
+            respond(exchange, 200, "[" + BOOK + "]");
+        } else {
+            respond(exchange, 400, "{\"code\": \"VALIDATION_FAILED\", \"message\": \"id must be a number\", \"status\": 400}");
         }
     }
 

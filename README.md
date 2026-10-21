@@ -126,12 +126,12 @@ public interface BooksResource extends ConfigurationResource<BooksResource> {
 ```
 
 - Интерфейс наследует `ConfigurationResource<СвойТип>` — так у ресурса появляются настройки запроса
-  (`setHeader`, `setCookie`, `setQueryParam`, `setBody`, `reset`, …) и `assured`.
+  (`setHeader`, `setCookie`, `setQueryParam`, `setPathParam`, `setBody`, `reset`, …) и `assured`.
 - Class-level `@Path` — только у корня; подресурсы получают путь от `@Path` на методе-локаторе.
 - Метод с телом (`POST`/`PUT`/`PATCH`) обязан объявить `@Consumes` — на методе или интерфейсе; без него ресурс
   не построится (`RESTEASY004590`). Из `@Consumes` берётся только первое значение.
 
-## Настройка запроса: заголовки, cookie, query-параметры, тело
+## Настройка запроса: заголовки, cookie, параметры, тело
 
 Ресурс — объект со своими настройками запроса:
 
@@ -151,6 +151,7 @@ books.reset();                             // снять все настройк
 | `setHeader(name, value, ...)` / `deleteHeader(name)` | задать значения заголовка / убрать заголовок |
 | `setCookie(name, value)` / `deleteCookie(name)` | задать cookie / убрать cookie (в том числе из `@CookieParam`) |
 | `setQueryParam(name, value, ...)` / `deleteQueryParam(name)` | задать значения query-параметра / убрать параметр (в том числе из `@QueryParam`) |
+| `setPathParam(name, value)` | задать значение параметра пути `{name}` — вместо значения из `@PathParam` метода или локатора |
 | `setBody(raw)` | отправить вместо DTO строку как есть, с итоговым `Content-Type` |
 | `reset()` | снять все настройки ресурса, включая унаследованные от родителя |
 
@@ -159,6 +160,7 @@ books.reset();                             // снять все настройк
 ```java
 books.assured(r -> r.setQueryParam("limit", "abc").findAll(1, 20, null, null)).statusCode(400);  // строка вместо Integer
 books.assured(r -> r.deleteQueryParam("page").findAll(1, 20, null, null)).statusCode(400);       // без обязательного параметра
+books.assured(r -> r.setPathParam("id", "abc").findOne(7)).statusCode(400);                      // строка вместо Integer в пути
 books.assured(r -> r.setCookie("session", "expired").findOne(7)).statusCode(401);
 books.assured(r -> r.setBody("{\"price\": \"free\"}").patch(7, new PatchBookDto())).statusCode(400);  // битый JSON вместо DTO
 ```
@@ -168,13 +170,20 @@ books.assured(r -> r.setBody("{\"price\": \"free\"}").patch(7, new PatchBookDto(
 - Каждый `get...Resource()` возвращает **новый** ресурс с настройками родителя на момент получения.
 - Повторная настройка заменяет предыдущую: того же заголовка (регистр имени не важен), той же cookie,
   того же параметра, тела. Несколько значений — в порядке объявления: `setQueryParam("status", "NEW", "PAID")`.
-- Настройка применяется последней — после параметров метода (`@HeaderParam`, `@QueryParam`, `@CookieParam`, тела)
-  и фильтров клиента, поэтому перекрывает и их: `deleteHeader("Authorization")` убирает токен `BearerAuthFilter`.
+- Настройка применяется последней — после параметров метода (`@HeaderParam`, `@QueryParam`, `@PathParam`,
+  `@CookieParam`, тела), значений локаторов и фильтров клиента, поэтому перекрывает и их:
+  `deleteHeader("Authorization")` убирает токен `BearerAuthFilter`.
   Не настраиваются только заголовки самого HTTP-клиента (`Host`, `Content-Length`, `Connection`).
+- `setPathParam` подставляет значение в шаблон `{name}` раньше параметров метода и локаторов, поэтому заменяет
+  и `id` из `findOne(7)`, и `id`, переданный в `getStoreResource(3)` выше по дереву:
+  `stores.getStoreResource(3).getBooksResource().assured(r -> r.setPathParam("id", "abc").findAll(null))` уйдёт
+  на `/stores/abc/books`. Значение кодируется как сегмент пути (пробел — `%20`, `/` — `%2F`). Если в пути вызова
+  нет `{name}`, на этот вызов настройка не влияет. `reset()` её снимает, а значения локаторов остаются.
 - `setBody` — по смыслу одноразовая настройка, удобнее внутри `assured(...)`. `Content-Type` берётся итоговый
   (из `@Consumes` или `setHeader`), кодировка — из его `charset`, по умолчанию UTF-8. Для GET тело не отправится.
 - Cookie из ответов (`Set-Cookie`) клиент не запоминает: иначе cookie одного теста ушли бы в запросах другого.
-- Текущую настройку показывает `toString()` ресурса: `BooksResource [X-Actor=qa, -Authorization, query:limit=abc]`.
+- Текущую настройку показывает `toString()` ресурса:
+  `BooksResource [X-Actor=qa, -Authorization, query:limit=abc, path:id=abc]`.
   Примененную к запросу настройку пишет DEBUG-лог `io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions`
   (значения не маскируются — токены попадут в лог).
 - Настроенный ресурс не храните в `static`-поле — его изменения увидят все тесты.

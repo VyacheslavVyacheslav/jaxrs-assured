@@ -1,12 +1,14 @@
 package io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.parameters;
 
 import jakarta.ws.rs.client.ClientRequestContext;
+import jakarta.ws.rs.client.WebTarget;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Неизменяемый набор настроек запроса, заданных через ConfigurationResource: заголовки, cookie, query-параметры, тело.
+ * Неизменяемый набор настроек запроса, заданных через ConfigurationResource: заголовки, cookie, query-параметры,
+ * параметры пути, тело.
  * Каждое изменение порождает новый экземпляр, исходный не меняется.
  */
 public final class RequestConfiguration {
@@ -37,6 +39,17 @@ public final class RequestConfiguration {
 
     public boolean isEmpty() {
         return settings.isEmpty();
+    }
+
+    /**
+     * Параметры пути из setPathParam — в шаблон пути, до создания запроса.
+     */
+    public WebTarget resolvePath(WebTarget target) {
+        WebTarget resolved = target;
+        for (RequestSetting setting : settings) {
+            resolved = setting.resolvePath(resolved);
+        }
+        return resolved;
     }
 
     /**

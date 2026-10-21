@@ -12,6 +12,8 @@ import org.jboss.resteasy.client.jaxrs.internal.ClientResponse;
 import org.jboss.resteasy.client.jaxrs.internal.proxy.ClientInvoker;
 import org.jboss.resteasy.client.jaxrs.internal.proxy.extractors.ClientContext;
 import org.jboss.resteasy.client.jaxrs.internal.proxy.extractors.EntityExtractor;
+import org.jboss.resteasy.client.jaxrs.internal.proxy.processors.InvocationProcessor;
+import org.jboss.resteasy.client.jaxrs.internal.proxy.processors.WebTargetProcessor;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.extractors.AssuredEntityExtractor;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.extractors.AssuredResponseExtractorFactory;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.parameters.RequestConfiguration;
@@ -33,12 +35,45 @@ public class AssuredClientInvoker extends ClientInvoker implements ExtendedClien
     }
 
     /**
-     * Все пути отправки (RestEasy и наши sendSync/sendAsync) создают запрос здесь: отметка времени —
-     * начало отсчета времени ответа в AssuredResponse.
+     * Запрос без настройки — так его создают invokeSync/invokeAsync из RestEasy.
      */
     @Override
     protected ClientInvocation createRequest(Object[] args) {
-        ClientInvocation request = super.createRequest(args);
+        return createRequest(args, RequestConfiguration.EMPTY);
+    }
+
+    /**
+     * Копия ClientInvoker.createRequest из RestEasy 6.2.12 (сверять при обновлении) с другим началом шаблона пути:
+     * сначала значения из setPathParam, потом отложенные значения локаторов и только потом @PathParam метода.
+     * Уже подставленный шаблон resolveTemplate не меняет, поэтому setPathParam перекрывает и параметр метода,
+     * и параметры локаторов выше по дереву.
+     * Все пути отправки (RestEasy и наши sendSync/sendAsync) создают запрос здесь: отметка времени —
+     * начало отсчета времени ответа в AssuredResponse.
+     */
+    protected ClientInvocation createRequest(Object[] args, RequestConfiguration configuration) {
+        WebTarget target = configuration.resolvePath(webTarget);
+        if (target instanceof AssuredClientWebTarget assuredTarget) {
+            target = assuredTarget.resolvePathParams();
+        }
+        for (int i = 0; i < processors.length; i++) {
+            if (processors[i] instanceof WebTargetProcessor processor) {
+                target = processor.build(target, args[i]);
+            }
+        }
+        ClientInvocationBuilder builder = (ClientInvocationBuilder) target.request();
+        ClientInvocation request = (ClientInvocation) builder.build(httpMethod);
+        request.setClientInvoker(this);
+        if (target != webTarget) {
+            request.setActualTarget(target);
+        }
+        if (accepts != null) {
+            request.getHeaders().accept(accepts);
+        }
+        for (int i = 0; i < processors.length; i++) {
+            if (processors[i] instanceof InvocationProcessor processor) {
+                processor.process(request, args[i]);
+            }
+        }
         request.property(AssuredEntityExtractor.REQUEST_STARTED_NANOS, System.nanoTime());
         return request;
     }
@@ -54,7 +89,7 @@ public class AssuredClientInvoker extends ClientInvoker implements ExtendedClien
         if (configuration.isEmpty()) {
             return invoke(args);
         }
-        ClientInvocation request = createRequest(args);
+        ClientInvocation request = createRequest(args, configuration);
         request.property(RequestConfiguration.PROPERTY, configuration);
         return rxInvokerProvider != null ? sendAsync(request) : sendSync(request, extractor);
     }
@@ -67,7 +102,7 @@ public class AssuredClientInvoker extends ClientInvoker implements ExtendedClien
         if (rxInvokerProvider != null) {
             throw new UnsupportedOperationException("assured(...) не поддерживает реактивные методы: " + method.getName());
         }
-        ClientInvocation request = createRequest(args);
+        ClientInvocation request = createRequest(args, configuration);
         if (!configuration.isEmpty()) {
             request.property(RequestConfiguration.PROPERTY, configuration);
         }
