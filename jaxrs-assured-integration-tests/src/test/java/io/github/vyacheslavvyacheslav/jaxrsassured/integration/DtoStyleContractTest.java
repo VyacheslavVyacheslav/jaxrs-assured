@@ -65,6 +65,22 @@ class DtoStyleContractTest {
 
     @ParameterizedTest
     @ValueSource(strings = {PLAIN, LOMBOK})
+    void beanParamBuildsCopiesAndPrintsTheSame(String base) throws Exception {
+        // бин @BeanParam — вложенный класс интерфейса, тот же контракт, что у DTO
+        Object builder = Class.forName(base + ".resources.books.BooksResource$FindAllParams")
+                .getMethod("builder").invoke(null);
+        with(builder, "page", 1);
+        with(builder, "genre", "FICTION");
+        Object params = build(builder);
+        assertEquals("BooksResource.FindAllParams(page=1, limit=null, authorId=null, genre=FICTION)", params.toString());
+
+        Object changed = build(with(params.getClass().getMethod("toBuilder").invoke(params), "limit", 20));
+        assertEquals(20, get(changed, "getLimit"));
+        assertEquals(null, get(params, "getLimit"), "Исходный бин не меняется");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {PLAIN, LOMBOK})
     void genericPageFromBuilderRoundTripsThroughJackson(String base) throws Exception {
         Class<?> page = Class.forName(base + ".model.PageDto");
         Class<?> genre = Class.forName(base + ".model.Genre");
@@ -86,7 +102,9 @@ class DtoStyleContractTest {
     @Test
     void bothStylesExposeSameApi() throws Exception {
         for (String type : List.of(".model.Genre", ".model.Genre$GenreBuilder", ".model.PageDto",
-                ".model.PageDto$PageDtoBuilder", ".model.Book", ".model.OperationStatusDto")) {
+                ".model.PageDto$PageDtoBuilder", ".model.Book", ".model.OperationStatusDto",
+                ".resources.books.BooksResource$FindAllParams",
+                ".resources.books.BooksResource$FindAllParams$FindAllParamsBuilder")) {
             assertEquals(api(Class.forName(PLAIN + type)), api(Class.forName(LOMBOK + type)), "Публичный API " + type);
         }
         // публичный конструктор — только без аргументов (Jackson); всё остальное — через билдер

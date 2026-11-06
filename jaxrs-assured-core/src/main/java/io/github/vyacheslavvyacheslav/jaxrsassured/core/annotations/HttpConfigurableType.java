@@ -8,6 +8,7 @@ public enum HttpConfigurableType {
     DELETE_COOKIE,
     QUERY_PARAM,
     DELETE_QUERY_PARAM,
+    PATH_PARAM,
     BODY,
     RESET;
 }

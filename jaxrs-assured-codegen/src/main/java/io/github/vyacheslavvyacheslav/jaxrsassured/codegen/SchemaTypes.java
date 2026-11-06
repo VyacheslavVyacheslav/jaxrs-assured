@@ -4,6 +4,7 @@ import com.squareup.javapoet.ArrayTypeName;
 import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.ParameterizedTypeName;
 import com.squareup.javapoet.TypeName;
+import com.squareup.javapoet.WildcardTypeName;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
@@ -37,8 +38,9 @@ import java.util.Set;
  *     <li>array → List&lt;тип items&gt;; string → String (в том числе date-time); integer → Integer/Long(int64);
  *         number → Double (с int32 → Integer, int64 → Long); boolean → Boolean;
  *         безтиповые и free-form схемы → JsonNode.</li>
- *     <li>исключение — параметры: number без format → Integer. Параметр уходит в URL через toString(),
- *         и Double дал бы "20.0" вместо "20" для id в пути, page, limit.</li>
+ *     <li>исключение — параметры: number без format → Number (массив — List&lt;? extends Number&gt;).
+ *         number в спеке бывает и целым (id, page), и дробным (метры, проценты): Number принимает и то,
+ *         и другое, а дробные core отправляет без «.0» и экспоненты (DecimalParamConverterProvider).</li>
  * </ul>
  */
 final class SchemaTypes {
@@ -53,6 +55,7 @@ final class SchemaTypes {
     private static final TypeName BOXED_DOUBLE = TypeName.DOUBLE.box();
     private static final TypeName BOXED_BOOLEAN = TypeName.BOOLEAN.box();
     private static final TypeName BYTE_ARRAY = ArrayTypeName.of(TypeName.BYTE);
+    static final ClassName NUMBER = ClassName.get(Number.class);
 
     private final Map<String, String> importMappings;
     private final Components components;
@@ -126,11 +129,15 @@ final class SchemaTypes {
             return STRING;
         }
         if ("array".equals(type)) {
-            return listOf(paramType(schema.getItems()));
+            TypeName item = paramType(schema.getItems());
+            // List<Number> не принял бы переменную List<Integer>
+            return NUMBER.equals(item)
+                    ? ParameterizedTypeName.get(ClassName.get(List.class), WildcardTypeName.subtypeOf(NUMBER))
+                    : listOf(item);
         }
         if ("number".equals(type) && schema.getFormat() == null) {
-            // в URL параметр уходит через toString(): Double дал бы /drivers/1.0 и ?limit=20.0
-            return BOXED_INTEGER;
+            // number — и целое, и дробное: Number примет и 20, и 2.5, и 79991234567L
+            return NUMBER;
         }
         return primitive(type, schema.getFormat());
     }

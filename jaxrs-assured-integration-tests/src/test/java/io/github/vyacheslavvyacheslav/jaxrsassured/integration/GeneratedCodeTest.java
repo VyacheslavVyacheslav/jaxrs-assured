@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.V1Resource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.model.ActionAcceptedDto;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.model.Address;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.model.ApiErrorDto;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.model.ArchiveRequestDto;
@@ -32,9 +33,15 @@ import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.c
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.catalog.CatalogResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.events.EventOrdersResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.giftcards.GiftCardsResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.orders.OrderCancellationsResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.orders.OrderReceiptResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.orders.OrdersResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.reports.ReportArchivesResource;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.reports.ReportFileResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.stores.StoreBooksResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.stores.StoreResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.plain.resources.stores.StoresResource;
+import jakarta.ws.rs.BeanParam;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.Path;
@@ -79,12 +86,18 @@ class GeneratedCodeTest {
 
     @Test
     void booksFollowSpec() throws Exception {
-        Method findAll = BooksResource.class.getMethod("findAll", Integer.class, Integer.class, Integer.class, String.class);
-        assertEquals(List.of("query:page", "query:limit", "query:authorId", "query:genre"), params(findAll));
+        // 4 query-параметра — больше порога 3: бин @BeanParam, вложенный класс FindAllParams с билдером
+        Method findAll = BooksResource.class.getMethod("findAll", BooksResource.FindAllParams.class);
+        assertNotNull(findAll.getParameters()[0].getAnnotation(BeanParam.class));
+        assertEquals(List.of("query:page", "query:limit", "query:authorId", "query:genre"),
+                queryFields(BooksResource.FindAllParams.class));
+        assertEquals(Number.class, BooksResource.FindAllParams.class.getDeclaredField("page").getType());
+        assertEquals("BooksResource.FindAllParams(page=1, limit=null, authorId=null, genre=FICTION)",
+                BooksResource.FindAllParams.builder().page(1).genre("FICTION").build().toString());
         assertEquals(BASE + ".model.PageDto<" + BASE + ".model.Book>", findAll.getGenericReturnType().getTypeName());
 
-        // лист {id} инлайнится в BooksResource; number без format в пути — Integer, а не Double
-        Method findOne = BooksResource.class.getMethod("findOne", Integer.class);
+        // лист {id} инлайнится в BooksResource; number без format в параметре — Number: и целое, и дробное
+        Method findOne = BooksResource.class.getMethod("findOne", Number.class);
         assertEquals("{id}", findOne.getAnnotation(Path.class).value());
         assertEquals(List.of("path:id"), params(findOne));
         assertEquals(Book.class, findOne.getReturnType());
@@ -92,8 +105,8 @@ class GeneratedCodeTest {
         Method create = BooksResource.class.getMethod("create", CreateBookDto.class);
         assertArrayEquals(new String[]{"application/json"}, create.getAnnotation(Consumes.class).value());
         assertEquals(Book.class, create.getReturnType());
-        assertEquals(void.class, BooksResource.class.getMethod("remove", Integer.class).getReturnType());
-        assertEquals(Book.class, BooksResource.class.getMethod("patch", Integer.class, PatchBookDto.class).getReturnType());
+        assertEquals(void.class, BooksResource.class.getMethod("remove", Number.class).getReturnType());
+        assertEquals(Book.class, BooksResource.class.getMethod("patch", Number.class, PatchBookDto.class).getReturnType());
 
         // статический ребёнок — подресурс
         Method snapshots = BooksResource.class.getMethod("getSnapshotsResource");
@@ -101,6 +114,28 @@ class GeneratedCodeTest {
         assertEquals(BookSnapshotsResource.class, snapshots.getReturnType());
         assertEquals(SnapshotSyncResultDto.class,
                 BookSnapshotsResource.class.getMethod("sync", SyncBooksDto.class).getReturnType());
+    }
+
+    @Test
+    void inlineEnumQueryParamIsNestedEnum() throws Exception {
+        // status в спеке — встроенный enum: вложенный энум интерфейса вместо String
+        Method findAll = OrdersResource.class.getMethod("findAll", OrdersResource.Status.class);
+        assertEquals(List.of("query:status"), params(findAll));
+        assertEquals(List.of("NEW", "PAID", "SHIPPED", "DELIVERED", "CANCELLED"),
+                Arrays.stream(OrdersResource.Status.values()).map(OrdersResource.Status::toString).toList());
+    }
+
+    @Test
+    void optionalBodyHasOverloadWithoutBody() throws Exception {
+        // requestBody.required: false — метод с телом и перегрузка без тела и без @Consumes
+        Method withBody = OrderCancellationsResource.class.getMethod("cancel", JsonNode.class);
+        assertArrayEquals(new String[]{"application/json"}, withBody.getAnnotation(Consumes.class).value());
+        Method withoutBody = OrderCancellationsResource.class.getMethod("cancel");
+        assertNull(withoutBody.getAnnotation(Consumes.class), "Без тела — без @Consumes, Content-Type не уйдет");
+        assertEquals(ActionAcceptedDto.class, withoutBody.getReturnType());
+
+        // обязательное тело — без перегрузки
+        assertThrows(NoSuchMethodException.class, () -> BooksResource.class.getMethod("create"));
     }
 
     @Test
@@ -119,6 +154,11 @@ class GeneratedCodeTest {
         assertEquals(AuthorIdResource.class,
                 AuthorsResource.class.getMethod("getAuthorIdResource", String.class).getReturnType());
         assertEquals(AuthorIdBooksResource.class, AuthorIdResource.class.getMethod("getBooksResource").getReturnType());
+
+        // тип параметра локатора — из ручек поддерева: number без format — Number, как у инлайнового findOne
+        Method store = StoresResource.class.getMethod("getStoreResource", Number.class);
+        assertEquals(List.of("path:id"), params(store));
+        assertEquals(StoreBooksResource.class, StoreResource.class.getMethod("getBooksResource").getReturnType());
 
         // лист {code} — не {id}, но тоже инлайнится
         assertEquals("{code}", GiftCardsResource.class.getMethod("findOne", String.class).getAnnotation(Path.class).value());
@@ -149,7 +189,7 @@ class GeneratedCodeTest {
         assertEquals(String.class, receipt.getReturnType());
         assertProduces("text/html", receipt);
 
-        assertNull(BooksResource.class.getMethod("findOne", Integer.class).getAnnotation(Produces.class),
+        assertNull(BooksResource.class.getMethod("findOne", Number.class).getAnnotation(Produces.class),
                 "JSON — умолчание, без @Produces");
     }
 
@@ -224,6 +264,14 @@ class GeneratedCodeTest {
     /** Параметры метода как «где:имя» по аннотациям JAX-RS. */
     private static List<String> params(Method method) {
         return Arrays.stream(method.getParameters()).map(GeneratedCodeTest::param).toList();
+    }
+
+    /** Поля бина @BeanParam с @QueryParam — в порядке объявления. */
+    private static List<String> queryFields(Class<?> bean) {
+        return Arrays.stream(bean.getDeclaredFields())
+                .filter(field -> field.isAnnotationPresent(QueryParam.class))
+                .map(field -> "query:" + field.getAnnotation(QueryParam.class).value())
+                .toList();
     }
 
     private static String param(Parameter parameter) {

@@ -7,6 +7,7 @@ import io.swagger.v3.oas.models.Paths;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.media.Content;
 import io.swagger.v3.oas.models.media.MediaType;
+import io.swagger.v3.oas.models.media.NumberSchema;
 import io.swagger.v3.oas.models.media.ObjectSchema;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.media.StringSchema;
@@ -22,6 +23,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -75,6 +77,7 @@ class ResourceModelBuilderTest {
         LocatorModel driverLocator = locator(drivers, "getDriverResource");
         assertEquals("{id}", driverLocator.path());
         assertEquals("id", driverLocator.pathParam());
+        assertEquals("java.lang.String", driverLocator.pathParamType().toString(), "Ни одна ручка не объявила id");
         assertEquals("DriverResource", driverLocator.childClass());
 
         ResourceModel driver = byName(models, "DriverResource");
@@ -122,6 +125,262 @@ class ResourceModelBuilderTest {
         byName(models, "LocationGatesScheduleResource");
         byName(models, "LocationIdResource");
         byName(models, "LocationIdSettingsResource");
+    }
+
+    @Test
+    void locatorParamTakesTypeFromSubtreeOperations() {
+        OpenAPI spec = new OpenAPI()
+                .components(new Components().addSchemas("BookFormat",
+                        new StringSchema()._enum(List.of("e_book", "paperback"))))
+                .paths(new Paths()
+                        // {id} с ручкой и ребёнком: тип из обеих ручек
+                        .addPathItem("/api/v1/books/{id}", new PathItem().get(new Operation()
+                                .operationId("BooksController_findOne")
+                                .addParametersItem(pathParam("id", new NumberSchema()))
+                                .responses(responses200())))
+                        .addPathItem("/api/v1/books/{id}/cover", new PathItem().get(new Operation()
+                                .operationId("BooksController_cover")
+                                .addParametersItem(pathParam("id", new NumberSchema()))
+                                .responses(responses200())))
+                        // $ref на энум
+                        .addPathItem("/api/v1/formats/{format}/books", new PathItem().get(new Operation()
+                                .operationId("FormatsController_books")
+                                .addParametersItem(pathParam("format",
+                                        new Schema<>().$ref("#/components/schemas/BookFormat")))
+                                .responses(responses200())))
+                        // параметр объявлен на пути, а не на ручке
+                        .addPathItem("/api/v1/shelves/{shelfId}/books", new PathItem()
+                                .addParametersItem(pathParam("shelfId", new IntegerSchema().format("int64")))
+                                .get(new Operation().operationId("ShelvesController_books").responses(responses200()))));
+
+        ResourceModelBuilder builder = new ResourceModelBuilder(CONFIG, new SchemaTypes(CONFIG, spec));
+        List<ResourceModel> models = builder.build(PathTree.of(spec));
+
+        assertEquals("java.lang.Number",
+                locator(byName(models, "BooksResource"), "getBookResource").pathParamType().toString());
+        assertEquals("gen.model.BookFormat",
+                locator(byName(models, "FormatsResource"), "getFormatResource").pathParamType().toString());
+        assertEquals("java.lang.Long",
+                locator(byName(models, "ShelvesResource"), "getShelfIdResource").pathParamType().toString());
+        assertEquals(List.of(), builder.warnings());
+    }
+
+    @Test
+    void locatorParamFallsBackToStringWhenOperationsDisagree() {
+        OpenAPI spec = new OpenAPI().paths(new Paths()
+                .addPathItem("/api/v1/orders/{id}", new PathItem().get(new Operation()
+                        .operationId("OrdersController_findOne")
+                        .addParametersItem(pathParam("id", new NumberSchema()))
+                        .responses(responses200())))
+                .addPathItem("/api/v1/orders/{id}/receipt", new PathItem().get(new Operation()
+                        .operationId("OrdersController_receipt")
+                        .addParametersItem(pathParam("id", new StringSchema()))
+                        .responses(responses200()))));
+
+        ResourceModelBuilder builder = new ResourceModelBuilder(CONFIG, new SchemaTypes(CONFIG, spec));
+        List<ResourceModel> models = builder.build(PathTree.of(spec));
+
+        assertEquals("java.lang.String",
+                locator(byName(models, "OrdersResource"), "getOrderResource").pathParamType().toString());
+        assertTrue(builder.warnings().stream().anyMatch(w -> w.contains("{id}")
+                        && w.contains("Number: GET /api/v1/orders/{id}")
+                        && w.contains("String: GET /api/v1/orders/{id}/receipt")),
+                builder.warnings().toString());
+    }
+
+    @Test
+    void locatorParamOfDifferentNumericTypesIsNumber() {
+        // integer в одной ручке, number в другой — не ошибка спеки: Number принимает оба
+        OpenAPI spec = new OpenAPI().paths(new Paths()
+                .addPathItem("/api/v1/orders/{id}", new PathItem().get(new Operation()
+                        .operationId("OrdersController_findOne")
+                        .addParametersItem(pathParam("id", new IntegerSchema()))
+                        .responses(responses200())))
+                .addPathItem("/api/v1/orders/{id}/receipt", new PathItem().get(new Operation()
+                        .operationId("OrdersController_receipt")
+                        .addParametersItem(pathParam("id", new NumberSchema()))
+                        .responses(responses200()))));
+
+        ResourceModelBuilder builder = new ResourceModelBuilder(CONFIG, new SchemaTypes(CONFIG, spec));
+        List<ResourceModel> models = builder.build(PathTree.of(spec));
+
+        assertEquals("java.lang.Number",
+                locator(byName(models, "OrdersResource"), "getOrderResource").pathParamType().toString());
+        assertEquals(List.of(), builder.warnings());
+    }
+
+    @Test
+    void optionalBodyGetsOverloadWithoutBodyAndConsumes() {
+        Content anyJson = new Content().addMediaType("application/json",
+                new MediaType().schema(new ObjectSchema().additionalProperties(true)));
+        OpenAPI spec = new OpenAPI().paths(new Paths()
+                .addPathItem("/api/v1/orders/{id}/cancellations", new PathItem().post(new Operation()
+                        .operationId("OrdersController_cancel")
+                        .addParametersItem(pathParam("id", new StringSchema()))
+                        .requestBody(new RequestBody().required(false).content(anyJson))
+                        .responses(responses200())))
+                // required не указан — по стандарту OpenAPI это false
+                .addPathItem("/api/v1/orders/{id}/comments", new PathItem().post(new Operation()
+                        .operationId("OrdersController_comment")
+                        .addParametersItem(pathParam("id", new StringSchema()))
+                        .requestBody(new RequestBody().content(anyJson))
+                        .responses(responses200())))
+                .addPathItem("/api/v1/orders", new PathItem().post(new Operation()
+                        .operationId("OrdersController_create")
+                        .requestBody(new RequestBody().required(true).content(anyJson))
+                        .responses(responses200()))));
+
+        List<ResourceModel> models = new ResourceModelBuilder(CONFIG, new SchemaTypes(CONFIG, spec))
+                .build(PathTree.of(spec));
+
+        assertEquals(List.of("cancel(BODY) @Consumes(application/json)", "cancel()"),
+                signatures(byName(models, "OrderCancellationsResource")));
+        assertEquals(List.of("comment(BODY) @Consumes(application/json)", "comment()"),
+                signatures(byName(models, "OrderCommentsResource")));
+        assertEquals(List.of("create(BODY) @Consumes(application/json)"), signatures(byName(models, "OrdersResource")));
+    }
+
+    @Test
+    void ignoredHeadersAreNotGeneratedAndUnknownOnesAreReported() {
+        OpenAPI spec = new OpenAPI().paths(new Paths()
+                .addPathItem("/api/v1/auth/me", new PathItem().get(new Operation()
+                        .operationId("AuthController_me")
+                        .addParametersItem(new Parameter().name("authorization").in("header").schema(new StringSchema()))
+                        .addParametersItem(new Parameter().name("X-Request-Id").in("header").schema(new StringSchema()))
+                        .responses(responses200())))
+                .addPathItem("/api/v1/zones", new PathItem().post(new Operation()
+                        .operationId("ZonesController_create")
+                        .addParametersItem(new Parameter().name("X-Actor").in("header").schema(new StringSchema()))
+                        .addParametersItem(new Parameter().name("X-Requested-By").in("header").schema(new StringSchema()))
+                        .requestBody(new RequestBody().required(true).content(new Content().addMediaType("application/json",
+                                new MediaType().schema(new ObjectSchema()))))
+                        .responses(responses200()))));
+        GenConfig config = new GenConfig(Path.of("spec.json"), Path.of("out"), "gen", "api/v1", "V1Resource",
+                List.of(), null, Map.of(), false, false, Map.of(),
+                Set.of("Authorization", "x-actor", "X-REQUESTED-BY", "X-Tenant"));
+
+        ResourceModelBuilder builder = new ResourceModelBuilder(config, new SchemaTypes(config, spec));
+        List<ResourceModel> models = builder.build(PathTree.of(spec));
+
+        // регистр не важен: Authorization из настройки убирает authorization из спеки
+        assertEquals(List.of("HEADER:X-Request-Id"), paramKeys(operation(models, "AuthMeResource", "me")));
+        assertEquals(List.of("BODY:body"), paramKeys(operation(models, "ZonesResource", "create")));
+        assertEquals(List.of("Заголовок x-tenant из ignoreHeaders (--ignore-header) не встретился ни в одной ручке"),
+                builder.warnings());
+    }
+
+    @Test
+    void inlineEnumParamsBecomeNestedEnums() {
+        OpenAPI spec = new OpenAPI().paths(new Paths()
+                .addPathItem("/api/v1/tasks", new PathItem().get(new Operation()
+                        .operationId("TasksController_findAll")
+                        .addParametersItem(queryEnum("status", "new", "done"))
+                        .addParametersItem(new Parameter().name("zones").in("query").schema(
+                                new ArraySchema().items(new StringSchema()._enum(List.of("msk", "spb")))))
+                        .responses(responses200())))
+                .addPathItem("/api/v1/tasks/{id}", new PathItem()
+                        // те же значения под тем же именем — тот же энум
+                        .get(new Operation().operationId("TasksController_findOne")
+                                .addParametersItem(pathParam("id", new StringSchema()))
+                                .addParametersItem(queryEnum("status", "new", "done"))
+                                .responses(responses200()))
+                        // другие значения — с префиксом метода
+                        .patch(new Operation().operationId("TasksController_update")
+                                .addParametersItem(pathParam("id", new StringSchema()))
+                                .addParametersItem(queryEnum("status", "draft", "final"))
+                                .responses(responses200()))));
+
+        ResourceModelBuilder builder = new ResourceModelBuilder(CONFIG, new SchemaTypes(CONFIG, spec));
+        List<ResourceModel> models = builder.build(PathTree.of(spec));
+
+        String tasks = "gen.resources.tasks.TasksResource";
+        assertEquals(tasks + ".Status", paramType(operation(models, "TasksResource", "findAll"), "status"));
+        assertEquals("java.util.List<" + tasks + ".Zones>", paramType(operation(models, "TasksResource", "findAll"), "zones"));
+        assertEquals(tasks + ".Status", paramType(operation(models, "TasksResource", "findOne"), "status"));
+        assertEquals(tasks + ".UpdateStatus", paramType(operation(models, "TasksResource", "update"), "status"));
+
+        ResourceModel resource = byName(models, "TasksResource");
+        assertEquals(List.of("Status", "Zones", "UpdateStatus"), resource.enums().stream().map(EnumModel::className).toList());
+        assertEquals(List.of("NEW", "DONE"), resource.enums().get(0).constants().stream().map(EnumModel.Constant::name).toList());
+        assertEquals(List.of("new", "done"), resource.enums().get(0).constants().stream().map(EnumModel.Constant::value).toList());
+        assertEquals(List.of(), builder.warnings());
+    }
+
+    @Test
+    void moreThanThresholdQueryParamsGoToBeanParam() {
+        OpenAPI spec = beanParamsSpec();
+
+        List<ResourceModel> models = new ResourceModelBuilder(CONFIG, new SchemaTypes(CONFIG, spec))
+                .build(PathTree.of(spec));
+
+        // 4 query-параметра — бин на месте первого из них; путь и заголовок остаются в сигнатуре
+        OperationModel findOne = operation(models, "VehiclesResource", "findOne");
+        assertEquals(List.of("PATH:id", "BEAN:params", "HEADER:X-Trace"), paramKeys(findOne));
+        assertEquals("gen.resources.vehicles.VehiclesResource.FindOneParams", paramType(findOne, "params"));
+        // 3 — не больше порога: позиционные
+        assertEquals(List.of("QUERY:page", "QUERY:limit", "QUERY:sort"),
+                paramKeys(operation(models, "VehiclesResource", "findAll")));
+        // перегрузка без тела — тот же бин
+        List<OperationModel> search = byName(models, "VehicleSearchResource").operations();
+        assertEquals(List.of("BEAN:params", "BODY:body"), paramKeys(search.get(0)));
+        assertEquals(List.of("BEAN:params"), paramKeys(search.get(1)));
+        assertEquals(List.of("SearchParams"),
+                byName(models, "VehicleSearchResource").beanParams().stream().map(DtoModel::className).toList());
+
+        List<DtoModel> beans = byName(models, "VehiclesResource").beanParams();
+        assertEquals(List.of("FindOneParams"), beans.stream().map(DtoModel::className).toList());
+        DtoModel bean = beans.get(0);
+        assertEquals("gen.resources.vehicles.VehiclesResource.FindOneParams", bean.selfClass().toString());
+        assertEquals(List.of("bodyLengthMFrom", "x-region", "tags", "page"),
+                bean.fields().stream().map(FieldModel::jsonName).toList());
+        assertEquals(List.of("java.lang.Number", "java.lang.String", "java.util.List<java.lang.String>",
+                "java.lang.Number"), bean.fields().stream().map(f -> f.type().toString()).toList());
+        assertEquals("xRegion", bean.fields().get(1).varName());
+    }
+
+    @Test
+    void zeroThresholdKeepsQueryParamsPositional() {
+        OpenAPI spec = beanParamsSpec();
+        GenConfig noBeans = new GenConfig(Path.of("spec.json"), Path.of("out"), "gen", "api/v1", "V1Resource",
+                List.of(), null, Map.of(), false, false, Map.of(), Set.of(), List.of(), 0);
+
+        List<ResourceModel> models = new ResourceModelBuilder(noBeans, new SchemaTypes(noBeans, spec))
+                .build(PathTree.of(spec));
+
+        assertEquals(List.of("PATH:id", "QUERY:bodyLengthMFrom", "QUERY:x-region", "QUERY:tags", "QUERY:page",
+                "HEADER:X-Trace"), paramKeys(operation(models, "VehiclesResource", "findOne")));
+        assertEquals(List.of(), byName(models, "VehiclesResource").beanParams());
+    }
+
+    /** GET /vehicles — 3 query; GET /vehicles/{id} — путь, 4 query, заголовок; POST /vehicles/search — 4 query и необязательное тело. */
+    private static OpenAPI beanParamsSpec() {
+        Content anyJson = new Content().addMediaType("application/json",
+                new MediaType().schema(new ObjectSchema().additionalProperties(true)));
+        return new OpenAPI().paths(new Paths()
+                .addPathItem("/api/v1/vehicles", new PathItem().get(new Operation()
+                        .operationId("VehiclesController_findAll")
+                        .addParametersItem(new Parameter().name("page").in("query").schema(new NumberSchema()))
+                        .addParametersItem(new Parameter().name("limit").in("query").schema(new NumberSchema()))
+                        .addParametersItem(new Parameter().name("sort").in("query").schema(new StringSchema()))
+                        .responses(responses200())))
+                .addPathItem("/api/v1/vehicles/{id}", new PathItem().get(new Operation()
+                        .operationId("VehiclesController_findOne")
+                        .addParametersItem(pathParam("id", new StringSchema()))
+                        .addParametersItem(new Parameter().name("bodyLengthMFrom").in("query").schema(new NumberSchema()))
+                        .addParametersItem(new Parameter().name("x-region").in("query").schema(new StringSchema()))
+                        .addParametersItem(new Parameter().name("tags").in("query").schema(
+                                new ArraySchema().items(new StringSchema())))
+                        .addParametersItem(new Parameter().name("page").in("query").schema(new NumberSchema()))
+                        .addParametersItem(new Parameter().name("X-Trace").in("header").schema(new StringSchema()))
+                        .responses(responses200())))
+                .addPathItem("/api/v1/vehicles/search", new PathItem().post(new Operation()
+                        .operationId("VehiclesController_search")
+                        .addParametersItem(new Parameter().name("a").in("query").schema(new StringSchema()))
+                        .addParametersItem(new Parameter().name("b").in("query").schema(new StringSchema()))
+                        .addParametersItem(new Parameter().name("c").in("query").schema(new StringSchema()))
+                        .addParametersItem(new Parameter().name("d").in("query").schema(new StringSchema()))
+                        .requestBody(new RequestBody().required(false).content(anyJson))
+                        .responses(responses200()))));
     }
 
     @Test
@@ -285,11 +544,40 @@ class ResourceModelBuilderTest {
                 .addPathItem("/api/v1/drivers", new PathItem().get(new Operation()
                         .operationId("DriversController_list")
                         .responses(new ApiResponses().addApiResponse("200", new ApiResponse()))))
+                // тело @Body() NestJS — required: true; без него по стандарту тело необязательно и будет перегрузка
                 .addPathItem("/api/v1/drivers/{id}/snapshots", new PathItem().post(new Operation()
                         .operationId("DriverSnapshotsController_sync")
-                        .requestBody(new RequestBody().content(new Content().addMediaType("application/json",
+                        .requestBody(new RequestBody().required(true).content(new Content().addMediaType("application/json",
                                 new MediaType().schema(new Schema<>().$ref("#/components/schemas/SyncDriversDto")))))
                         .responses(new ApiResponses().addApiResponse("202", new ApiResponse())))));
+    }
+
+    private static Parameter queryEnum(String name, String... values) {
+        return new Parameter().name(name).in("query").schema(new StringSchema()._enum(List.of(values)));
+    }
+
+    private static String paramType(OperationModel operation, String paramName) {
+        return operation.params().stream()
+                .filter(p -> p.paramName().equals(paramName))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Нет параметра " + paramName))
+                .typeName().toString();
+    }
+
+    private static List<String> paramKeys(OperationModel operation) {
+        return operation.params().stream().map(p -> p.in().name() + ":" + p.paramName()).toList();
+    }
+
+    /** Ручки интерфейса коротко: имя(места параметров) и @Consumes. */
+    private static List<String> signatures(ResourceModel model) {
+        return model.operations().stream()
+                .map(o -> o.methodName() + "(" + String.join(",", o.params().stream().map(p -> p.in().name()).toList())
+                        + ")" + (o.consumes() == null ? "" : " @Consumes(" + o.consumes() + ")"))
+                .toList();
+    }
+
+    private static Parameter pathParam(String name, Schema<?> schema) {
+        return new Parameter().name(name).in("path").required(true).schema(schema);
     }
 
     private static ApiResponses responses200() {

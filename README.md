@@ -1,32 +1,338 @@
 # jaxrs-assured
 
-Типизированные JAX-RS-клиенты для API-тестов на Java. Обычные интерфейсы с `@GET`/`@Path` и DTO —
-а в тесте у каждого ресурса есть настройка запроса на ходу и проверки ответа в стиле rest-assured.
-Интерфейсы и DTO можно не писать руками, а сгенерировать из OpenAPI-спеки.
+**Библиотека для API-тестов на Java: ручки сервиса описываются JAX-RS-интерфейсами, а ответы проверяются
+всей мощью rest-assured.**
+
+В основе — три идеи:
+
+- **JAX-RS-ресурсы.** API описывается интерфейсами со стандартными аннотациями `@Path`, `@GET`, `@QueryParam` —
+  только объявление, реализацию строит прокси. Тест вызывает метод и получает готовый DTO.
+- **`AssuredResponse`.** Любой вызов можно обернуть в `assured(...)` и проверить статус, тело, заголовки и время
+  ответа привычным API rest-assured. Ошибка 4xx/5xx при этом не исключение, а ответ, который можно проверить.
+- **`ConfigurationResource`.** Каждый ресурс умеет менять запрос на ходу: добавить или убрать заголовок, cookie,
+  query-параметр, подменить параметр пути или тело. Так пишутся негативные тесты, которые типизированный клиент
+  обычно не пропускает.
 
 ```java
 BooksResource books = client.api().getBooksResource();
 
-Book book = books.findOne(7);                                       // типизированный DTO
+Book book = books.findOne(7);                                       // обычный вызов — типизированный DTO
 
-books.assured(r -> r.findOne(404))                                  // ответ для проверок вместо исключения
+books.assured(r -> r.findOne(404))                                  // тот же метод — ответ для проверок
         .statusCode(404)
         .body("code", equalTo("NOT_FOUND"));
 
 books.assured(r -> r.setQueryParam("limit", "abc").findAll(1, 20, null, null))
-        .statusCode(400);                                           // негативная проверка мимо типов
-
-Book created = books.create(CreateBookDto.builder().title("Новая книга").price(9.99).build());
+        .statusCode(400);                                           // строка вместо числа — в обход типов
 ```
+
+Интерфейсы и DTO можно написать руками или сгенерировать из OpenAPI-спеки — генератор входит в проект.
+
+## Зачем: JAX-RS вместо клиента на rest-assured
+
+rest-assured — отличный инструмент для проверок, и в аккуратном проекте ручки не пишут строками в каждом тесте,
+а собирают в классы-клиенты на `RequestSpecification`. Обычно это выглядит так:
+
+```java
+public class BooksClient {
+
+    private final RequestSpecification spec;
+
+    public BooksClient(RequestSpecification base) {
+        spec = new RequestSpecBuilder().addRequestSpecification(base).setBasePath("/api/v1/books").build();
+    }
+
+    public Response findAll(Integer page, Integer limit, Integer authorId, String genre) {
+        RequestSpecification request = given().spec(spec);
+        if (page != null) request.queryParam("page", page);
+        if (limit != null) request.queryParam("limit", limit);
+        if (authorId != null) request.queryParam("authorId", authorId);
+        if (genre != null) request.queryParam("genre", genre);
+        return request.get();
+    }
+
+    public Response findOne(Integer id) {
+        return given().spec(spec).pathParam("id", id).get("/{id}");
+    }
+
+    public Response create(CreateBookDto dto) {
+        return given().spec(spec).contentType(ContentType.JSON).body(dto).post();
+    }
+}
+```
+
+Тот же ресурс на JAX-RS. Здесь только объявление, реализацию строит прокси:
+
+```java
+public interface BooksResource extends ConfigurationResource<BooksResource> {
+
+    @GET
+    PageDto<Book> findAll(@QueryParam("page") Integer page, @QueryParam("limit") Integer limit,
+                          @QueryParam("authorId") Integer authorId, @QueryParam("genre") String genre);
+
+    @GET
+    @Path("{id}")
+    Book findOne(@PathParam("id") Integer id);
+
+    @POST
+    @Consumes("application/json")
+    Book create(CreateBookDto createBookDto);
+}
+```
+
+И в тесте:
+
+```java
+// клиент на rest-assured
+Book book = booksClient.findOne(7).then().statusCode(200).extract().as(Book.class);
+
+// jaxrs-assured: на 4xx/5xx — исключение
+Book book = books.findOne(7);
+```
+
+Чем JAX-RS удобнее:
+
+- **Объявление вместо реализации.** Ручка описывается сигнатурой, а не телом метода. Имя параметра, его тип и место
+  в запросе (путь, query, заголовок) стоят рядом, в одной аннотации. Меньше кода — меньше мест для ошибки
+  и меньше работы, когда API меняется.
+- **Сигнатура — это контракт.** `Book findOne(Integer id)` сразу говорит, что ручка принимает и что возвращает.
+  Метод клиента на rest-assured возвращает `Response`, а что внутри, знает только документация.
+- **Один метод на ручку.** В клиентах на rest-assured ручку часто описывают дважды: метод с `Response` для проверок
+  и метод с DTO для шагов теста. Здесь метод один: обычный вызов возвращает DTO, а `assured(...)` — ответ
+  для проверок.
+- **Дерево ресурсов из коробки.** Подресурсы — методы-локаторы, пути складываются сами:
+  `api.getAuthorsResource().getAuthorResource("a1").getBooksResource()`. Настройки родителя, например заголовок,
+  переходят к подресурсам. В rest-assured базовые пути и спецификации подресурсов склеиваются вручную.
+- **Рутину берёт на себя JAX-RS.** Сериализация тела, `Content-Type` из `@Consumes`, разбор ответа в DTO, пропуск
+  `null`-параметров — без строчки кода в клиенте.
+- **Стандарт, а не самописный каркас.** Аннотации Jakarta REST знает любой Java-разработчик: это те же аннотации,
+  что в JAX-RS-сервисах. Интерфейсы переносимы между RestEasy, Jersey и CXF и генерируются из OpenAPI. Клиент
+  на rest-assured в каждом проекте устроен по-своему.
+
+При этом сильные стороны rest-assured остаются. Проверки ответа — это тот же rest-assured (`AssuredResponse`),
+а гибкость `given()` для негативных запросов возвращает `ConfigurationResource`.
+
+| | клиент на rest-assured | jaxrs-assured |
+|---|---|---|
+| описание ручки | метод с телом: `given().spec(...)…get(...)` | сигнатура с аннотациями |
+| тип ответа | `Response`, содержимое известно из документации | DTO в сигнатуре |
+| DTO и проверки | два метода на ручку или `extract().as(...)` в тестах | один метод: DTO или `assured(...)` |
+| подресурсы | базовые пути склеиваются вручную | методы-локаторы, пути складываются сами |
+| необязательные параметры | `if (x != null)` в каждом методе | `null` в запрос не уходит |
+| проверки ответа | GPath + Hamcrest | GPath + Hamcrest — тот же rest-assured |
+| неверный запрос для негативного теста | `given()` позволяет всё | `setQueryParam`, `setBody`, `deleteHeader`, … |
+| переносимость | свой каркас в каждом проекте | стандарт Jakarta REST |
+
+Обычные типизированные клиенты (Feign, Retrofit, JAX-RS без обвязки) тоже дают интерфейсы, но в тестах неудобны:
+на 4xx/5xx бросают исключение и не дают отправить заведомо неверный запрос. Эти пробелы закрывают `assured(...)`
+и `ConfigurationResource`.
+
+## JAX-RS: API как дерево интерфейсов
+
+Корень API и подресурсы связаны методами-локаторами, поэтому код повторяет структуру URL:
+
+```java
+@Path("api/v1")
+public interface V1Resource extends ConfigurationResource<V1Resource> {
+
+    @Path("books")
+    BooksResource getBooksResource();
+
+    @Path("authors")
+    AuthorsResource getAuthorsResource();
+}
+```
+
+Параметр пути тоже может жить в локаторе. Тогда `getAuthorResource("a1")` возвращает отдельный ресурс конкретного
+автора — `AuthorResource`, и его ручкам id уже не нужен:
+
+```java
+public interface AuthorsResource extends ConfigurationResource<AuthorsResource> {
+
+    @GET
+    PageDto<Author> findAll(@QueryParam("page") Integer page, @QueryParam("limit") Integer limit);
+
+    @Path("{id}")
+    AuthorResource getAuthorResource(@PathParam("id") String id);     // локатор с параметром пути
+}
+
+public interface AuthorResource extends ConfigurationResource<AuthorResource> {
+
+    @GET
+    Author findOne();                                                 // id уже в пути
+
+    @Path("books")
+    AuthorBooksResource getBooksResource();
+}
+
+public interface AuthorBooksResource extends ConfigurationResource<AuthorBooksResource> {
+
+    @GET
+    PageDto<Book> findAll(@QueryParam("page") Integer page, @QueryParam("format") BookFormat format);
+}
+```
+
+```java
+AuthorResource author = api.getAuthorsResource().getAuthorResource("a1");
+
+author.findOne();                                          // GET /api/v1/authors/a1
+author.getBooksResource().findAll(1, BookFormat.E_BOOK);   // GET /api/v1/authors/a1/books?page=1&format=e_book
+```
+
+IDE ведёт по API как по дереву: после точки видны и подресурсы, и ручки. Поменялся путь или параметр — правится
+интерфейс, а компилятор сам покажет все затронутые тесты.
+
+Тела запросов собираются билдерами DTO, ответы приходят готовыми объектами, необязательный параметр передаётся
+как `null` и в запрос не попадает:
+
+```java
+Book created = books.create(CreateBookDto.builder().title("Новая книга").price(9.99).build());
+PageDto<Book> fiction = books.findAll(1, 20, null, "FICTION");      // ?page=1&limit=20&genre=FICTION
+```
+
+Подробнее — [Интерфейсы ресурсов](#интерфейсы-ресурсов).
+
+## AssuredResponse: проверки rest-assured из коробки
+
+Обычный вызов возвращает DTO, а на 4xx/5xx бросает исключение — так удобно, когда ответ нужен для следующего шага
+теста. Когда проверяется сам ответ, тот же вызов оборачивается в `assured(...)`:
+
+```java
+books.assured(r -> r.findAll(1, 20, null, "FICTION"))
+        .statusCode(200)
+        .contentType(ContentType.JSON)
+        .time(lessThan(2000L))
+        .body("total", greaterThan(0))
+        .body("data.genre.code", everyItem(equalTo("FICTION")))
+        .body("data.title", hasItem("Мастер и Маргарита"));
+```
+
+`AssuredResponse` — это `ValidatableResponse` из rest-assured, поэтому работает всё, что вы уже знаете:
+
+- статус, заголовки, `Content-Type`, время ответа;
+- тело через GPath и матчеры Hamcrest: `body("data.size()", equalTo(20))`,
+  `body("data.find { it.id == 7 }.title", equalTo("Мастер и Маргарита"))`;
+- извлечение значений: `extract().path("data[0].id")`, `extract().as(Book.class)`, `extract().asString()`;
+- печать запроса и ответа в лог, если проверка упала.
+
+Главное отличие от типизированного клиента: ошибка сервиса становится обычным ответом, который можно разобрать
+и проверить.
+
+```java
+books.assured(r -> r.findOne(404))
+        .statusCode(404)
+        .body("code", equalTo("NOT_FOUND"))
+        .body("message", notNullValue());
+```
+
+Сигнатуры ресурса для этого менять не нужно: один и тот же интерфейс обслуживает и позитивные сценарии, где нужен
+DTO, и проверки ответа.
+
+Подробнее — [Ответ для проверок: assured](#ответ-для-проверок-assured).
+
+## ConfigurationResource: запрос можно изменить на ходу
+
+Типы защищают от ошибок, но негативному тесту нужна именно ошибка: строка вместо числа, запрос без обязательного
+параметра, битый JSON, просроченная сессия, запрос без токена. Для этого каждый ресурс, унаследованный от
+`ConfigurationResource`, умеет менять запрос. Эти методы — не HTTP-ручки: прокси перехватывает их и запоминает
+настройку.
+
+```java
+// только для одного вызова — внутри assured(...)
+books.assured(r -> r.setQueryParam("limit", "abc").findAll(1, 20, null, null)).statusCode(400);     // строка вместо числа
+books.assured(r -> r.setPathParam("id", "abc").findOne(7)).statusCode(400);                         // строка вместо числа в пути
+books.assured(r -> r.deleteQueryParam("page").findAll(1, 20, null, null)).statusCode(400);          // без обязательного параметра
+books.assured(r -> r.setBody("{\"price\": \"free\"}").patch(7, new PatchBookDto())).statusCode(400); // битый JSON вместо DTO
+books.assured(r -> r.setCookie("session", "expired").findOne(7)).statusCode(401);                   // просроченная сессия
+books.assured(r -> r.deleteHeader("Authorization").findOne(7)).statusCode(401);                     // без токена
+
+// для всех следующих вызовов — на самом ресурсе
+BooksResource books = api.getBooksResource()
+        .setHeader("X-Actor", "qa")
+        .setHeader("Accept-Language", "ru");
+```
+
+- **Сигнатура метода не мешает.** Настройка применяется последней — после параметров метода, локаторов и фильтров
+  клиента — и перекрывает их: `deleteHeader("Authorization")` убирает даже токен, который подставил
+  `BearerAuthFilter`, а `setPathParam("id", "abc")` заменяет и `id` из `findOne(7)`, и `id`, переданный в локатор
+  `getStoreResource(3)` выше по дереву.
+- **Два режима.** На ресурсе настройка действует на все его следующие вызовы, внутри `assured(...)` — только на один.
+- **Настройки не утекают.** Каждый `get...Resource()` возвращает новый ресурс с настройками родителя на момент
+  получения; его собственные изменения родителя не трогают. `reset()` снимает все настройки, а значения,
+  переданные в локаторы, остаются: это адрес ресурса.
+- **Видно, что настроено.** `toString()` ресурса показывает текущую настройку:
+  `BooksResource [X-Actor=qa, -Authorization, query:limit=abc]`.
+
+Подробнее — [Настройка запроса](#настройка-запроса-заголовки-cookie-параметры-тело).
+
+## Генератор из OpenAPI
+
+Интерфейсы можно не писать руками: `jaxrs-assured-codegen` строит дерево JAX-RS-ресурсов и DTO из OpenAPI-спеки
+(json/yaml) — Maven-плагином прямо в сборке или из командной строки. DTO получаются с билдерами, на обычной Java
+или на Lombok.
+
+Генератор от core не зависит: он выдаёт чистые JAX-RS-интерфейсы, пригодные для любого прокси-клиента
+(RestEasy, Jersey, CXF). С core их связывает один параметр — `superInterface`.
+Подробнее — [jaxrs-assured-codegen](#jaxrs-assured-codegen).
+
+## Сравнение с openapi-generator
+
+Ближайший готовый аналог — [openapi-generator](https://openapi-generator.tech) с генератором `java` и
+`library=rest-assured`. Он тоже строит из спеки типизированный клиент поверх rest-assured: у каждой операции есть
+билдер параметров, `executeAs(...)` возвращает DTO, `execute(...)` — ответ rest-assured, а `reqSpec(...)` позволяет
+дописать в запрос что угодно. Примерно так:
+
+```java
+// openapi-generator, library=rest-assured
+Book book = api.books().findOne().idPath(7)
+        .executeAs(r -> r.then().statusCode(200).extract().response());
+
+api.books().findAll()
+        .reqSpec(spec -> spec.addQueryParam("limit", "abc"))
+        .execute(r -> r.then().statusCode(400));
+```
+
+```java
+// jaxrs-assured
+Book book = books.findOne(7);
+
+books.assured(r -> r.setQueryParam("limit", "abc").findAll(1, 20, null, null))
+        .statusCode(400);
+```
+
+Оба подхода дают типы, DTO и проверки rest-assured. Разница в том, как описано API и как с ним работает тест:
+
+| | openapi-generator (`library=rest-assured`) | jaxrs-assured |
+|---|---|---|
+| что получается | классы-реализации с билдером на каждую операцию | JAX-RS-интерфейсы, только объявления |
+| писать и править руками | не принято: кода много, при генерации он перезаписывается | можно: интерфейс короткий, генератор — по желанию |
+| структура API | плоские классы по тегам: `api.books().findOne()` | дерево по URL: `api.getAuthorsResource().getAuthorResource("a1").getBooksResource()` |
+| вызов ручки | билдер: `.idPath(7).executeAs(...)` | метод: `findOne(7)` |
+| DTO или ответ для проверок | `executeAs(...)` или `execute(...)` | обычный вызов или `assured(...)` |
+| изменить запрос | `reqSpec(...)` — всё, что умеет `RequestSpecBuilder` | `set...` и `delete...` перекрывают параметры метода и фильтры; `delete...` убирает значение, кем бы оно ни было выставлено |
+| общие настройки | `reqSpecSupplier` на весь клиент или `reqSpec` на операцию | на любом узле дерева, подресурсы их наследуют |
+| транспорт | rest-assured | RestEasy (JAX-RS), проверки — rest-assured |
+| привязка к библиотеке | код привязан к rest-assured | чистые JAX-RS-интерфейсы подходят RestEasy, Jersey, CXF |
+
+Где openapi-generator сильнее — это стоит учитывать при выборе:
+
+- **Зрелость.** Большое сообщество, годы развития, поддержка почти всех возможностей OpenAPI. jaxrs-assured
+  молодой: `oneOf`/`anyOf` и наследование через `allOf` пока становятся `JsonNode`.
+- **Allure из коробки.** Запросы идут через rest-assured, поэтому работает стандартный фильтр `AllureRestAssured`.
+  В jaxrs-assured запросы идут через RestEasy, своей интеграции с Allure пока нет.
+- **Доступность.** openapi-generator опубликован в Maven Central, jaxrs-assured пока ставится только локально.
+
+Среди генераторов openapi-generator есть и такие, что выдают JAX-RS-интерфейсы (например, `jaxrs-spec`
+с `interfaceOnly`), но они рассчитаны на сервер: интерфейсы плоские, без подресурсов-локаторов и без связки
+с проверками rest-assured.
+
+## Модули
 
 | Модуль | Что это |
 |---|---|
 | `jaxrs-assured-core` | фреймворк: прокси RestEasy, `ConfigurationResource` (настройка запроса на ходу), `AssuredResource` (ответ для проверок rest-assured) |
 | `jaxrs-assured-codegen` | генератор JAX-RS-интерфейсов и DTO из OpenAPI: Maven-плагин, CLI, исполняемый jar |
 | `jaxrs-assured-integration-tests` | интеграционные тесты генератора и сквозной тест «сгенерированный клиент + core» на учебной спеке [docs/openapi/bookstore.json](docs/openapi/bookstore.json) |
-
-Генератор от core не зависит: он выдаёт чистые JAX-RS-интерфейсы, пригодные для любого прокси-клиента
-(RestEasy, Jersey, CXF). С core их связывает один параметр — `superInterface`.
 
 ## Сборка
 
@@ -126,12 +432,16 @@ public interface BooksResource extends ConfigurationResource<BooksResource> {
 ```
 
 - Интерфейс наследует `ConfigurationResource<СвойТип>` — так у ресурса появляются настройки запроса
-  (`setHeader`, `setCookie`, `setQueryParam`, `setBody`, `reset`, …) и `assured`.
+  (`setHeader`, `setCookie`, `setQueryParam`, `setPathParam`, `setBody`, `reset`, …) и `assured`.
 - Class-level `@Path` — только у корня; подресурсы получают путь от `@Path` на методе-локаторе.
 - Метод с телом (`POST`/`PUT`/`PATCH`) обязан объявить `@Consumes` — на методе или интерфейсе; без него ресурс
   не построится (`RESTEASY004590`). Из `@Consumes` берётся только первое значение.
+- Дробные числа в параметрах (query, path, header, cookie, значения локаторов) уходят без лишнего:
+  `42.0` → `42`, `1.0E-4` → `0.0001`, `BigDecimal 2.50` → `2.5`. Так `id` из DTO, где `number` стал `Double`, можно
+  передать в следующий вызов как есть. Целые, `NaN` и бесконечности не меняются. Числа в `setHeader` идут так же,
+  а `setQueryParam` значение не конвертирует — оно уходит строкой как есть.
 
-## Настройка запроса: заголовки, cookie, query-параметры, тело
+## Настройка запроса: заголовки, cookie, параметры, тело
 
 Ресурс — объект со своими настройками запроса:
 
@@ -151,14 +461,16 @@ books.reset();                             // снять все настройк
 | `setHeader(name, value, ...)` / `deleteHeader(name)` | задать значения заголовка / убрать заголовок |
 | `setCookie(name, value)` / `deleteCookie(name)` | задать cookie / убрать cookie (в том числе из `@CookieParam`) |
 | `setQueryParam(name, value, ...)` / `deleteQueryParam(name)` | задать значения query-параметра / убрать параметр (в том числе из `@QueryParam`) |
+| `setPathParam(name, value)` | задать значение параметра пути `{name}` — вместо значения из `@PathParam` метода или локатора |
 | `setBody(raw)` | отправить вместо DTO строку как есть, с итоговым `Content-Type` |
 | `reset()` | снять все настройки ресурса, включая унаследованные от родителя |
 
 Главное применение — негативные проверки того, что не пропускают типизированные параметры:
 
 ```java
-books.assured(r -> r.setQueryParam("limit", "abc").findAll(1, 20, null, null)).statusCode(400);  // строка вместо Integer
+books.assured(r -> r.setQueryParam("limit", "abc").findAll(1, 20, null, null)).statusCode(400);  // строка вместо числа
 books.assured(r -> r.deleteQueryParam("page").findAll(1, 20, null, null)).statusCode(400);       // без обязательного параметра
+books.assured(r -> r.setPathParam("id", "abc").findOne(7)).statusCode(400);                      // строка вместо числа в пути
 books.assured(r -> r.setCookie("session", "expired").findOne(7)).statusCode(401);
 books.assured(r -> r.setBody("{\"price\": \"free\"}").patch(7, new PatchBookDto())).statusCode(400);  // битый JSON вместо DTO
 ```
@@ -168,13 +480,20 @@ books.assured(r -> r.setBody("{\"price\": \"free\"}").patch(7, new PatchBookDto(
 - Каждый `get...Resource()` возвращает **новый** ресурс с настройками родителя на момент получения.
 - Повторная настройка заменяет предыдущую: того же заголовка (регистр имени не важен), той же cookie,
   того же параметра, тела. Несколько значений — в порядке объявления: `setQueryParam("status", "NEW", "PAID")`.
-- Настройка применяется последней — после параметров метода (`@HeaderParam`, `@QueryParam`, `@CookieParam`, тела)
-  и фильтров клиента, поэтому перекрывает и их: `deleteHeader("Authorization")` убирает токен `BearerAuthFilter`.
+- Настройка применяется последней — после параметров метода (`@HeaderParam`, `@QueryParam`, `@PathParam`,
+  `@CookieParam`, тела), значений локаторов и фильтров клиента, поэтому перекрывает и их:
+  `deleteHeader("Authorization")` убирает токен `BearerAuthFilter`.
   Не настраиваются только заголовки самого HTTP-клиента (`Host`, `Content-Length`, `Connection`).
+- `setPathParam` подставляет значение в шаблон `{name}` раньше параметров метода и локаторов, поэтому заменяет
+  и `id` из `findOne(7)`, и `id`, переданный в `getStoreResource(3)` выше по дереву:
+  `stores.getStoreResource(3).getBooksResource().assured(r -> r.setPathParam("id", "abc").findAll(null))` уйдёт
+  на `/stores/abc/books`. Значение кодируется как сегмент пути (пробел — `%20`, `/` — `%2F`). Если в пути вызова
+  нет `{name}`, на этот вызов настройка не влияет. `reset()` её снимает, а значения локаторов остаются.
 - `setBody` — по смыслу одноразовая настройка, удобнее внутри `assured(...)`. `Content-Type` берётся итоговый
   (из `@Consumes` или `setHeader`), кодировка — из его `charset`, по умолчанию UTF-8. Для GET тело не отправится.
 - Cookie из ответов (`Set-Cookie`) клиент не запоминает: иначе cookie одного теста ушли бы в запросах другого.
-- Текущую настройку показывает `toString()` ресурса: `BooksResource [X-Actor=qa, -Authorization, query:limit=abc]`.
+- Текущую настройку показывает `toString()` ресурса:
+  `BooksResource [X-Actor=qa, -Authorization, query:limit=abc, path:id=abc]`.
   Примененную к запросу настройку пишет DEBUG-лог `io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions`
   (значения не маскируются — токены попадут в лог).
 - Настроенный ресурс не храните в `static`-поле — его изменения увидят все тесты.
@@ -273,8 +592,11 @@ Main <spec> <outDir> <basePackage> [флаги]      — генерация ис
 | `--root <путь>` | `rootPath` | корень дерева путей, по умолчанию `api/v1`; class-level `@Path` корня |
 | `--root-name <Имя>` | `rootName` | имя корневого интерфейса, по умолчанию `V1Resource` |
 | `--ignore <regex>` | `ignorePaths` (`<ignorePath>`) | пропустить пути, целиком совпавшие с regex; пути вне `--root` без него — ошибка |
+| `--ignore-header <имя>` | `ignoreHeaders` (`<ignoreHeader>`) | заголовок не становится параметром методов — его ставит фильтр (`BearerAuthFilter`) или `setHeader`; регистр не важен; имя, которого нет в спеке, — WARN |
 | `--super-interface полный.Класс` | `superInterface` | супер-интерфейс ресурсов: `XResource extends Класс<XResource>`; для core — `…core.clients.ConfigurationResource` |
 | `--import Схема=полный.Класс` | `importMappings` (`<Схема>класс</Схема>`) | схему не генерировать, ссылки типировать указанным классом |
+| `--type-override Схема.поле=Тип` | `typeOverrides` (`<typeOverride>`) | тип числового поля DTO: `Integer`, `Long`, `Double`, `BigDecimal`; `*` — любые символы (см. [Типы](#типы)) |
+| `--bean-param-threshold <N>` | `beanParamThreshold` | query-параметров у ручки больше `N` — они уходят в бин `@BeanParam`; по умолчанию `3`, `0` — никогда |
 | `--lombok` | `lombok` | DTO на аннотациях Lombok (см. [Два стиля DTO](#два-стиля-dto)) |
 | `--split-model` | `splitModel` | DTO по подпакетам групп путей (см. [Раскладка model](#раскладка-model-по-пакетам)) |
 | `--model-package Схема=группа` | `modelPackages` (`<Схема>группа</Схема>`) | закрепить пакет схемы при split-model; пустая группа — корень `model` |
@@ -301,10 +623,28 @@ Main <spec> <outDir> <basePackage> [флаги]      — генерация ис
 ```
 
 - `{param}` без детей инлайнится в родителя: `@Path("{id}")` + `@PathParam`.
+- Query-параметров у ручки больше трех (`--bean-param-threshold`) — они уходят в бин `@BeanParam`: вложенный
+  класс интерфейса `<Метод>Params` с билдером, `toBuilder()` и геттерами, как у DTO (с `--lombok` — на Lombok).
+  Вместо `findAll(1, 20, null, "FICTION")` — заполняются только нужные поля, пустые в запрос не уходят:
+  ```java
+  books.findAll(BooksResource.FindAllParams.builder().page(1).genre("FICTION").build());
+  ```
+  Параметры пути и заголовки остаются в сигнатуре; `setQueryParam`/`deleteQueryParam` перекрывают поля бина.
+  Порядок параметров в URL у бина задает RestEasy, а не порядок полей.
+- Header-параметр — `@HeaderParam` у метода. Заголовки, которые в тестах ставит фильтр или `setHeader`
+  (`Authorization`, `X-Actor`), лучше перечислить в `--ignore-header`: иначе в каждом вызове придется передавать
+  `null`, а токен, переданный и параметром, и через `BearerAuthFilter`, уйдет двумя значениями.
+- `{param}` с детьми — свой интерфейс за локатором: `StoreResource getStoreResource(@PathParam("id") Number id)`.
+  Тип параметра локатора берётся из ручек поддерева по тем же правилам, что у параметров ручек (`number` → `Number`,
+  `$ref` на энум → энум); разные числовые (`integer` в одной ручке, `number` в другой) — `Number`. Если ручки
+  объявили его по-разному иначе — `String` и WARN со списком расхождений.
 - Имя метода — operationId без префикса контроллера (`BooksController_findOne` → `findOne`).
 - Имя java-параметра сохраняет горбы (`X-Request-Id` → `xRequestId`); совпавшие в методе имена разводятся
   суффиксом: header `last-event-id` + query `lastEventId` → `lastEventId`, `lastEventIdQuery`.
-- Тело запроса → параметр-DTO + `@Consumes` (первый media type).
+- Тело запроса → параметр-DTO + `@Consumes` (первый media type). Необязательное тело (`requestBody.required: false`
+  или не указан — по стандарту OpenAPI это `false`) — ещё и перегрузка без тела и без `@Consumes`: рядом
+  с `cancel(JsonNode body)` — `cancel()`. Так запрос без тела уходит без `Content-Type`: RestEasy ставит его
+  по `@Consumes`, даже если передать `null`.
 - Перед записью удаляются только свои прошлые файлы — `.java` с пометкой «Сгенерировано jaxrs-assured-codegen»
   внутри папки `basePackage`; чужой файл на месте будущего исходника — ошибка до любых удалений.
 
@@ -327,17 +667,37 @@ SSE-вызов возвращается сразу, события читают�
 | `string` (включая date-time) | `String` |
 | `integer` / `int64` | `Integer` / `Long` |
 | `number` без format, `double`, `float` | `Double` — дробь не теряется |
-| `number` в query/path/header-параметре | `Integer` — в URL уходит через `toString()`, `Double` дал бы `?limit=20.0` |
+| `number` без format в query/path/header-параметре и у локатора | `Number` — `number` бывает и целым (`page`, `id`), и дробным (метры, проценты): принимает и `20`, и `2.5`, и `79991234567L` |
 | `boolean` | `Boolean` |
-| `array` | `List<тип items>` |
+| `array` | `List<тип items>`; массив `number` в параметре — `List<? extends Number>` (примет и `List<Integer>`) |
 | `$ref` на схему; `allOf [$ref X]` без своих свойств (ссылка с `description`/`nullable`) | DTO `X` |
 | энум (`enum` схемы или свойства) | Java-энум: константы `E_BOOK`, исходное значение `e_book` — в JSON (`@JsonValue`/`@JsonCreator`) и в URL (`toString()`) |
-| `$ref` на энум в query/path/header-параметре | тот же энум; в URL уходит значение из спеки: `format=e_book`, а не `E_BOOK` |
+| `$ref` на энум в query/path/header-параметре и у локатора | тот же энум; в URL уходит значение из спеки: `format=e_book`, а не `E_BOOK` |
+| встроенный `enum` в query/path/header-параметре | вложенный энум интерфейса ресурса: `OrdersResource.Status`, массив — `List<Status>`; те же значения под тем же именем — один энум, другие — с префиксом метода: `UpdateStatus`; у локатора — `String` |
 | `allOf [$ref PageDto, {data: array of $ref X}]` в ответе | `PageDto<X>` |
 | `object` без свойств, `anyOf`/`oneOf`, наследование через `allOf` | `JsonNode` (+ WARN) |
 
-Целые по смыслу поля, объявленные как `number` (`total`, `page`), тоже становятся `Double` — лечится в спеке:
-`@ApiProperty({ type: 'integer' })`.
+Целые по смыслу поля, объявленные как `number` (`id`, `total`, `page`), тоже становятся `Double`. Лучше всего это
+лечится в спеке (`@ApiProperty({ type: 'integer' })`), а пока ее не поправили — правилами `--type-override`:
+
+```xml
+<typeOverrides>
+    <typeOverride>*.id=Long</typeOverride>
+    <typeOverride>*.*Id=Long</typeOverride>
+    <typeOverride>PageDto.*=Integer</typeOverride>
+</typeOverrides>
+```
+
+- Правило — `Схема.поле=Тип`, `*` — любые символы; типы — `Integer`, `Long`, `Double`, `BigDecimal`.
+- Действует только на числовые поля (`number`, `integer`), у массива чисел — на элементы: строковый `id` правило
+  `*.id=Long` не тронет.
+- Из совпавших правил действует последнее — общие пишите раньше частных.
+- Правило, которое ни к чему не применилось (опечатка или его перекрыли ниже), — WARN.
+- Если поле на самом деле дробное, Jackson при чтении молча отбросит дробную часть (`ACCEPT_FLOAT_AS_INT`
+  включен по умолчанию) — переопределяйте только то, в чем уверены.
+
+`Double`, оставшийся без правила, можно сразу передать в параметр `Number`: core отправит `42.0` как `42`
+(см. [Интерфейсы ресурсов](#интерфейсы-ресурсов)).
 
 ### Постраничные выборки
 

@@ -75,6 +75,51 @@ class DtoModelBuilderTest {
     }
 
     @Test
+    void typeOverridesChangeOnlyNumericFieldsAndLastMatchWins() {
+        OpenAPI spec = new OpenAPI().components(new Components()
+                .addSchemas("RouteDto", new ObjectSchema()
+                        .addProperty("id", new NumberSchema())
+                        .addProperty("routeId", new NumberSchema())
+                        .addProperty("regionId", new IntegerSchema())
+                        .addProperty("lat", new NumberSchema())
+                        .addProperty("code", new StringSchema())
+                        .addProperty("stopIds", new ArraySchema().items(new NumberSchema())))
+                .addSchemas("RegionDto", new ObjectSchema()
+                        .addProperty("id", new StringSchema()))
+                .addSchemas("PageDto", new ObjectSchema()
+                        .addProperty("total", new NumberSchema())
+                        .addProperty("page", new NumberSchema())));
+        List<TypeOverrideRule> rules = List.of(
+                TypeOverrideRule.parse("*.id=Long"),
+                TypeOverrideRule.parse("*.*Id=Long"),
+                TypeOverrideRule.parse("*.*Ids=Long"),
+                TypeOverrideRule.parse("PageDto.*=Integer"),
+                TypeOverrideRule.parse("RouteDto.routeId=Integer"),   // последнее совпавшее важнее *.*Id
+                TypeOverrideRule.parse("*.code=Long"),                // строка — не трогает
+                TypeOverrideRule.parse("*.nothing=Long"));
+
+        DtoModelBuilder builder = new DtoModelBuilder(new SchemaTypes(CONFIG, spec), rules);
+        List<DtoModel> models = builder.build(spec);
+
+        DtoModel route = models.stream().filter(m -> m.className().equals("RouteDto")).findFirst().orElseThrow();
+        assertEquals("java.lang.Long", field(route, "id").type().toString());
+        assertEquals("java.lang.Integer", field(route, "routeId").type().toString());
+        assertEquals("java.lang.Long", field(route, "regionId").type().toString(), "integer тоже числовое");
+        assertEquals("java.lang.Double", field(route, "lat").type().toString(), "Без правила — как в спеке");
+        assertEquals("java.lang.String", field(route, "code").type().toString());
+        assertEquals("java.util.List<java.lang.Long>", field(route, "stopIds").type().toString());
+        DtoModel region = models.stream().filter(m -> m.className().equals("RegionDto")).findFirst().orElseThrow();
+        assertEquals("java.lang.String", field(region, "id").type().toString(), "Строковый id правило *.id не трогает");
+        DtoModel page = models.stream().filter(m -> m.className().equals("PageDto")).findFirst().orElseThrow();
+        assertEquals("java.lang.Integer", field(page, "total").type().toString());
+
+        assertEquals(List.of("*.code=Long", "*.nothing=Long"), builder.warnings().stream()
+                .filter(w -> w.contains("не применилось"))
+                .map(w -> w.substring(w.indexOf("Правило ") + 8, w.indexOf(" из typeOverrides")))
+                .toList());
+    }
+
+    @Test
     void importMappedSchemasAreNotGenerated() {
         OpenAPI spec = new OpenAPI().components(new io.swagger.v3.oas.models.Components()
                 .addSchemas("PageDto", new ObjectSchema().addProperties("data", new ArraySchema()))

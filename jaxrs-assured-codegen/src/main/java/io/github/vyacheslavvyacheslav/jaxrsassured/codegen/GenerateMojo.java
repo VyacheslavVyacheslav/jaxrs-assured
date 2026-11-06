@@ -11,8 +11,10 @@ import org.apache.maven.project.MavenProject;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -66,9 +68,32 @@ public class GenerateMojo extends AbstractMojo {
     @Parameter
     List<String> ignorePaths;
 
+    /**
+     * Заголовки, которые не становятся параметрами методов — их ставит фильтр или setHeader (флаг --ignore-header):
+     * {@code <ignoreHeaders><ignoreHeader>authorization</ignoreHeader></ignoreHeaders>}. Регистр не важен.
+     */
+    @Parameter
+    List<String> ignoreHeaders;
+
     /** Супер-интерфейс ресурсов, параметризуется самим интерфейсом: Класс&lt;Ресурс&gt; (флаг --super-interface). */
     @Parameter(property = "jaxrsassured.superInterface")
     String superInterface;
+
+    /**
+     * Тип числового поля DTO (флаг --type-override): {@code <typeOverrides><typeOverride>*.id=Long</typeOverride>...}.
+     * Типы: Integer, Long, Double, BigDecimal; {@code *} — любые символы; из совпавших правил действует последнее.
+     * Класс правила называется TypeOverrideRule не случайно: элемент {@code <typeOverride>} Maven пытается создать
+     * как класс TypeOverride из пакета плагина, если такой есть, — и падает вместо того, чтобы взять строку.
+     */
+    @Parameter
+    List<String> typeOverrides;
+
+    /**
+     * Query-параметров у ручки больше этого числа — они уходят в бин @BeanParam, вложенный класс
+     * {@code <Метод>Params} с билдером (флаг --bean-param-threshold); 0 — никогда.
+     */
+    @Parameter(property = "jaxrsassured.beanParamThreshold", defaultValue = "3")
+    int beanParamThreshold = GenConfig.DEFAULT_BEAN_PARAM_THRESHOLD;
 
     /** Схема → внешний класс, схема не генерируется (флаг --import): {@code <PageDto>com.example.Page</PageDto>}. */
     @Parameter
@@ -139,6 +164,25 @@ public class GenerateMojo extends AbstractMojo {
                 throw new MojoExecutionException("codegen: плохой regex в ignorePaths: " + regex, e);
             }
         }
+        Set<String> headers = new LinkedHashSet<>();
+        for (String header : ignoreHeaders == null ? List.<String>of() : ignoreHeaders) {
+            String name = header == null ? "" : header.trim();
+            if (!Naming.isHeaderName(name)) {
+                throw new MojoExecutionException("codegen: ожидалось имя заголовка в ignoreHeaders: \"" + header + "\"");
+            }
+            headers.add(name);
+        }
+        if (beanParamThreshold < 0) {
+            throw new MojoExecutionException("codegen: beanParamThreshold не может быть отрицательным: " + beanParamThreshold);
+        }
+        List<TypeOverrideRule> overrides = new ArrayList<>();
+        for (String rule : typeOverrides == null ? List.<String>of() : typeOverrides) {
+            try {
+                overrides.add(TypeOverrideRule.parse(rule));
+            } catch (IllegalArgumentException e) {
+                throw new MojoExecutionException("codegen: typeOverrides: " + e.getMessage(), e);
+            }
+        }
         Map<String, String> mappings = importMappings == null ? Map.of() : importMappings;
         for (Map.Entry<String, String> mapping : mappings.entrySet()) {
             if (!Naming.isIdentifier(mapping.getKey()) || !mapping.getValue().contains(".")
@@ -163,6 +207,6 @@ public class GenerateMojo extends AbstractMojo {
             throw new MojoExecutionException("codegen: modelPackages работает только вместе со splitModel");
         }
         return new GenConfig(spec.toPath(), outputDirectory.toPath(), basePackage, rootPath, rootName,
-                ignore, superInterface, mappings, lombok, splitModel, pins);
+                ignore, superInterface, mappings, lombok, splitModel, pins, headers, overrides, beanParamThreshold);
     }
 }

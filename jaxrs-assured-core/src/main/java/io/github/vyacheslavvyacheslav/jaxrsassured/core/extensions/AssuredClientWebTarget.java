@@ -1,5 +1,6 @@
 package io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions;
 
+import jakarta.ws.rs.client.WebTarget;
 import jakarta.ws.rs.core.UriBuilder;
 import org.jboss.resteasy.client.jaxrs.ProxyConfig;
 import org.jboss.resteasy.client.jaxrs.ResteasyClient;
@@ -8,6 +9,7 @@ import org.jboss.resteasy.client.jaxrs.internal.ClientWebTarget;
 import org.jboss.resteasy.client.jaxrs.internal.proxy.ClientInvoker;
 import org.jboss.resteasy.client.jaxrs.internal.proxy.ClientInvokerFactory;
 import org.jboss.resteasy.util.IsHttpMethod;
+import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.parameters.DecimalParamConverterProvider;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.parameters.RequestConfigurationFilter;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.proxy.ClientProxyFactory;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.proxy.ExtendedClientProxyFactory;
@@ -15,33 +17,71 @@ import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.proxy.ProxyBu
 
 import java.lang.reflect.Method;
 import java.net.URI;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
  * Target, на котором строятся прокси ресурсов: создает Assured-инвокеры и сам регистрирует RequestConfigurationFilter,
- * без которого настройка из ConfigurationResource не применяется к запросам.
+ * без которого настройка из ConfigurationResource не применяется к запросам, и DecimalParamConverterProvider —
+ * дробные числа в параметрах без «.0» и экспоненты.
  * Тип тела по умолчанию не задается: метод с телом обязан объявить @Consumes на себе или на интерфейсе.
+ * Может нести отложенные значения параметров пути (withPathParams): так локаторы передают подресурсу свой адрес.
  */
 public class AssuredClientWebTarget extends ClientWebTarget implements ClientInvokerFactory {
 
+    /**
+     * Значения параметров пути, которые подставятся при HTTP-вызове; шаблоны {name} до тех пор остаются в пути.
+     */
+    private final Map<String, Object> pathParams;
+
     protected AssuredClientWebTarget(ResteasyClient client, ClientConfiguration configuration) {
         super(client, configuration);
-        registerRequestConfigurationFilter();
+        this.pathParams = Map.of();
+        registerCoreProviders();
     }
 
     public AssuredClientWebTarget(ResteasyClient client, String uri, ClientConfiguration configuration) throws IllegalArgumentException, NullPointerException {
         super(client, uri, configuration);
-        registerRequestConfigurationFilter();
+        this.pathParams = Map.of();
+        registerCoreProviders();
     }
 
     public AssuredClientWebTarget(ResteasyClient client, URI uri, ClientConfiguration configuration) throws NullPointerException {
         super(client, uri, configuration);
-        registerRequestConfigurationFilter();
+        this.pathParams = Map.of();
+        registerCoreProviders();
     }
 
     public AssuredClientWebTarget(ResteasyClient client, UriBuilder uriBuilder, ClientConfiguration configuration) throws NullPointerException {
+        this(client, uriBuilder, configuration, Map.of());
+    }
+
+    private AssuredClientWebTarget(ResteasyClient client, UriBuilder uriBuilder, ClientConfiguration configuration,
+                                   Map<String, Object> pathParams) {
         super(client, uriBuilder, configuration);
-        registerRequestConfigurationFilter();
+        this.pathParams = pathParams;
+        registerCoreProviders();
+    }
+
+    /**
+     * Тот же target с отложенными значениями параметров пути: шаблоны {name} остаются в пути, а значения подставляет
+     * resolvePathParams при HTTP-вызове — уже после setPathParam, поэтому setPathParam их перекрывает.
+     */
+    public AssuredClientWebTarget withPathParams(Map<String, ?> values) {
+        client.abortIfClosed();
+        Map<String, Object> merged = new HashMap<>(pathParams);
+        values.forEach((name, value) -> merged.put(Objects.requireNonNull(name, "Path param name can not be null"),
+                Objects.requireNonNull(value, "Path param " + name + " can not be null")));
+        return new AssuredClientWebTarget(client, uriBuilder.clone(), configuration, Map.copyOf(merged));
+    }
+
+    /**
+     * Подставляет отложенные значения параметров пути. Шаблоны, подставленные раньше (setPathParam), уже не меняются.
+     */
+    public WebTarget resolvePathParams() {
+        return pathParams.isEmpty() ? this : resolveTemplates(pathParams);
     }
 
     @Override
@@ -67,9 +107,12 @@ public class AssuredClientWebTarget extends ClientWebTarget implements ClientInv
         return ProxyBuilder.builder(proxyInterface, cwt, clientProxyFactory);
     }
 
+    /**
+     * path, resolveTemplate, queryParam и т.п. сохраняют отложенные значения параметров пути.
+     */
     @Override
     protected ClientWebTarget newInstance(ResteasyClient client, UriBuilder uriBuilder, ClientConfiguration configuration) {
-        return new AssuredClientWebTarget(client, uriBuilder, configuration);
+        return new AssuredClientWebTarget(client, uriBuilder, configuration, pathParams);
     }
 
     @Override
@@ -84,11 +127,15 @@ public class AssuredClientWebTarget extends ClientWebTarget implements ClientInv
     }
 
     /**
-     * Дочерние target (path, resolveTemplate) получают копию конфигурации — фильтр в ней уже есть.
+     * Фильтр настройки запроса и конвертер дробных чисел в параметрах. Дочерние target (path, resolveTemplate)
+     * получают копию конфигурации — в ней они уже есть.
      */
-    private void registerRequestConfigurationFilter() {
+    private void registerCoreProviders() {
         if (!getConfiguration().isRegistered(RequestConfigurationFilter.class)) {
             register(RequestConfigurationFilter.class);
+        }
+        if (!getConfiguration().isRegistered(DecimalParamConverterProvider.class)) {
+            register(DecimalParamConverterProvider.class);
         }
     }
 }

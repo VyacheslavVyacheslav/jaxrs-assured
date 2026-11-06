@@ -11,6 +11,9 @@ import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.model.CreateB
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.model.Genre;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.model.PageDto;
 import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.resources.books.BooksResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.resources.orders.OrderCancellationsResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.resources.orders.OrdersResource;
+import io.github.vyacheslavvyacheslav.jaxrsassured.integration.e2e.resources.stores.StoreResource;
 import jakarta.ws.rs.NotFoundException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,12 +64,15 @@ class EndToEndTest {
     private volatile String lastUri;
     private volatile String lastActor;
     private volatile String lastBody;
+    private volatile String lastContentType;
 
     @BeforeEach
     void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/api/v1/books", this::books);
         server.createContext("/api/v1/authors", this::authorBooks);
+        server.createContext("/api/v1/stores", this::storeBooks);
+        server.createContext("/api/v1/orders", this::orderCancellations);
         server.start();
         api = client.api("http://127.0.0.1:" + server.getAddress().getPort());
     }
@@ -91,10 +97,17 @@ class EndToEndTest {
 
     @Test
     void pageIsTyped() {
-        PageDto<Book> page = api.getBooksResource().findAll(1, 20, null, "FICTION");
+        // 4 query-параметра — бин @BeanParam: заполняются только нужные, пустые в запрос не уходят
+        PageDto<Book> page = api.getBooksResource().findAll(BooksResource.FindAllParams.builder()
+                .page(1)
+                .limit(20)
+                .genre("FICTION")
+                .build());
 
         assertEquals("Мастер и Маргарита", page.getData().get(0).getTitle());
-        assertEquals(1.0, page.getTotal());
+        // total в спеке — number, typeOverrides PageDto.*=Integer в execution e2e делает его Integer
+        assertEquals(Integer.valueOf(1), page.getTotal());
+        assertEquals(Double.valueOf(12.5), page.getData().get(0).getPrice(), "Дробное поле без правила — Double");
         Map<String, String> query = query(lastUri);
         assertEquals(Map.of("page", "1", "limit", "20", "genre", "FICTION"), query, "null-параметр не уходит");
     }
@@ -134,11 +147,56 @@ class EndToEndTest {
     @Test
     void negativeCheckOverridesTypedParameter() {
         api.getBooksResource()
-                .assured(r -> r.setQueryParam("limit", "abc").findAll(1, 20, null, null))
+                .assured(r -> r.setQueryParam("limit", "abc")
+                        .findAll(BooksResource.FindAllParams.builder().page(1).limit(20).build()))
                 .statusCode(400)
                 .body("code", equalTo("VALIDATION_FAILED"));
 
         assertEquals("abc", query(lastUri).get("limit"));
+    }
+
+    @Test
+    void typedLocatorParamIsOverriddenBySetPathParam() {
+        // id в спеке — number: локатор принимает Number
+        StoreResource store = api.getStoresResource().getStoreResource(3);
+
+        List<Book> books = store.getBooksResource().findAll(BookFormat.E_BOOK);
+        assertEquals("/api/v1/stores/3/books?format=e_book", lastUri);
+        assertEquals("Мастер и Маргарита", books.get(0).getTitle());
+
+        // number из DTO — Double: в путь уходит 3, а не 3.0
+        Double storeIdFromDto = 3.0;
+        api.getStoresResource().getStoreResource(storeIdFromDto).getBooksResource().findAll(null);
+        assertEquals("/api/v1/stores/3/books", lastUri);
+
+        // негативная проверка: в путь уходит то, что Integer не пропустил бы
+        store.getBooksResource()
+                .assured(r -> r.setPathParam("id", "abc").findAll(null))
+                .statusCode(400)
+                .body("code", equalTo("VALIDATION_FAILED"));
+        assertEquals("/api/v1/stores/abc/books", lastUri);
+    }
+
+    @Test
+    void inlineEnumQueryParamGoesAsSpecValue() {
+        api.getOrdersResource().findAll(OrdersResource.Status.PAID);
+
+        assertEquals("/api/v1/orders?status=PAID", lastUri);
+    }
+
+    @Test
+    void optionalBodyCanBeOmittedWithoutContentType() throws Exception {
+        // тело в спеке необязательно (required: false): у метода есть перегрузка без тела и без @Consumes
+        OrderCancellationsResource cancellations = api.getOrdersResource().getOrderResource("o1").getCancellationsResource();
+
+        assertEquals("op-1", cancellations.cancel().getOperationId());
+        assertEquals("/api/v1/orders/o1/cancellations", lastUri);
+        assertNull(lastContentType, "Без тела — без Content-Type");
+        assertEquals("", lastBody);
+
+        cancellations.cancel(new ObjectMapper().readTree("{\"clientOperationId\": \"c1\"}"));
+        assertEquals("application/json", lastContentType);
+        assertEquals("{\"clientOperationId\":\"c1\"}", lastBody);
     }
 
     @Test
@@ -178,6 +236,25 @@ class EndToEndTest {
             case "POST /api/v1/books" -> respond(exchange, 201,
                     "{\"id\": 100, \"title\": \"Новая книга\", \"price\": 9.99, \"format\": \"paperback\"}");
             default -> respond(exchange, 404, "{\"code\": \"NOT_FOUND\", \"message\": \"Книги нет\", \"status\": 404}");
+        }
+    }
+
+    /** POST /api/v1/orders/{id}/cancellations — запоминает Content-Type и тело, отвечает 202. */
+    private void orderCancellations(HttpExchange exchange) throws IOException {
+        lastBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        lastUri = exchange.getRequestURI().toString();
+        lastContentType = exchange.getRequestHeaders().getFirst("Content-Type");
+        respond(exchange, 202, "{\"operationId\": \"op-1\"}");
+    }
+
+    /** GET /api/v1/stores/{id}/books — id только число, иначе 400. */
+    private void storeBooks(HttpExchange exchange) throws IOException {
+        lastUri = exchange.getRequestURI().toString();
+        String id = exchange.getRequestURI().getPath().split("/")[4];
+        if (id.matches("\\d+")) {
+            respond(exchange, 200, "[" + BOOK + "]");
+        } else {
+            respond(exchange, 400, "{\"code\": \"VALIDATION_FAILED\", \"message\": \"id must be a number\", \"status\": 400}");
         }
     }
 

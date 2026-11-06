@@ -101,9 +101,9 @@ final class DtoWriter {
     /**
      * Энум с исходным значением: OK("ok"), round-trip через @JsonValue/@JsonCreator; toString() — тоже значение:
      * через него JAX-RS-клиент кладёт энум-параметр в URL (иначе ушло бы имя константы E_BOOK вместо e_book).
-     * javadoc null — вложенный.
+     * javadoc null — вложенный. Им же ResourceWriter пишет вложенные энумы параметров.
      */
-    private TypeSpec enumSpec(EnumModel enumModel, CodeBlock javadoc) {
+    static TypeSpec enumSpec(EnumModel enumModel, CodeBlock javadoc) {
         ClassName enumType = ClassName.get("", enumModel.className());
         TypeSpec.Builder builder = TypeSpec.enumBuilder(enumModel.className())
                 .addModifiers(Modifier.PUBLIC);

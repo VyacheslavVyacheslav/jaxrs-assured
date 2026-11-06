@@ -4,6 +4,7 @@ import jakarta.ws.rs.MatrixParam;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.client.WebTarget;
 import org.jboss.resteasy.client.jaxrs.ResteasyWebTarget;
+import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.AssuredClientWebTarget;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.ExtendedClientInvoker;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.parameters.RequestConfiguration;
 
@@ -12,7 +13,8 @@ import java.util.HashMap;
 
 /**
  * Локатор подресурса: строит прокси подресурса тем же контекстом, что и родитель,
- * передавая ему настройку родителя на момент вызова.
+ * передавая ему настройку родителя на момент вызова. Параметры пути локатора не подставляются сразу,
+ * а едут в target подресурса отложенными значениями (AssuredClientWebTarget.withPathParams).
  */
 public class SubResourceInvoker extends AbstractSubResourceInvoker implements ExtendedClientInvoker {
 
@@ -33,7 +35,10 @@ public class SubResourceInvoker extends AbstractSubResourceInvoker implements Ex
                 }
             }
             if (!pathParams.isEmpty()) {
-                target = target.resolveTemplates(pathParams);
+                // подставятся при HTTP-вызове, после setPathParam: иначе setPathParam не смог бы их перекрыть
+                target = target instanceof AssuredClientWebTarget assuredTarget
+                        ? assuredTarget.withPathParams(pathParams)
+                        : target.resolveTemplates(pathParams);
             }
         }
         return ProxyBuilder.proxy(iface, target, context, configuration);

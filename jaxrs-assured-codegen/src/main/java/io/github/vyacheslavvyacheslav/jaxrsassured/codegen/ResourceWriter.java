@@ -2,12 +2,14 @@ package io.github.vyacheslavvyacheslav.jaxrsassured.codegen;
 
 import com.squareup.javapoet.AnnotationSpec;
 import com.squareup.javapoet.ClassName;
+import com.squareup.javapoet.FieldSpec;
 import com.squareup.javapoet.JavaFile;
 import com.squareup.javapoet.MethodSpec;
 import com.squareup.javapoet.ParameterSpec;
 import com.squareup.javapoet.ParameterizedTypeName;
 import com.squareup.javapoet.TypeName;
 import com.squareup.javapoet.TypeSpec;
+import jakarta.ws.rs.BeanParam;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
@@ -38,9 +40,11 @@ final class ResourceWriter {
     private static final TypeName INPUT_STREAM = ClassName.get(InputStream.class);
 
     private final GenConfig config;
+    private final DtoStyle style;
 
     ResourceWriter(GenConfig config) {
         this.config = config;
+        this.style = DtoStyle.of(config);
     }
 
     void write(List<ResourceModel> models, java.nio.file.Path outDir) throws IOException {
@@ -72,7 +76,33 @@ final class ResourceWriter {
         for (LocatorModel locator : model.locators()) {
             builder.addMethod(locatorSpec(locator));
         }
+        // встроенные enum параметров: в URL уходит значение из спеки — toString() энума;
+        // тип внутри интерфейса JavaPoet требует пометить public static (в исходник неявные модификаторы не попадут)
+        for (EnumModel enumModel : model.enums()) {
+            builder.addType(DtoWriter.enumSpec(enumModel, null).toBuilder().addModifiers(Modifier.STATIC).build());
+        }
+        for (DtoModel bean : model.beanParams()) {
+            builder.addType(beanSpec(bean));
+        }
         return builder.build();
+    }
+
+    /**
+     * Бин @BeanParam: приватные поля с @QueryParam (RestEasy читает их напрямую, пустые в запрос не уходят),
+     * остальное — как у DTO в выбранном стиле: билдер, toBuilder(), геттеры, equals/toString или аннотации Lombok.
+     */
+    private TypeSpec beanSpec(DtoModel bean) {
+        TypeSpec.Builder type = TypeSpec.classBuilder(bean.className())
+                .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
+                .addJavadoc("Query-параметры ручки: заполняются билдером, пустые поля в запрос не уходят.\n");
+        for (FieldModel field : bean.fields()) {
+            type.addField(FieldSpec.builder(field.type(), field.varName(), Modifier.PRIVATE)
+                    .addAnnotation(AnnotationSpec.builder(QueryParam.class)
+                            .addMember("value", "$S", field.jsonName()).build())
+                    .build());
+        }
+        style.complete(type, bean);
+        return type.build();
     }
 
     private MethodSpec operationSpec(OperationModel operation) {
@@ -110,6 +140,7 @@ final class ResourceWriter {
                         .addMember("value", "$S", param.paramName()).build());
                 case HEADER -> parameter.addAnnotation(AnnotationSpec.builder(HeaderParam.class)
                         .addMember("value", "$S", param.paramName()).build());
+                case BEAN -> parameter.addAnnotation(BeanParam.class);
                 case BODY -> {
                     // тело запроса аннотации не требует
                 }
@@ -126,7 +157,7 @@ final class ResourceWriter {
                 .addAnnotation(AnnotationSpec.builder(Path.class)
                         .addMember("value", "$S", locator.path()).build());
         if (locator.pathParam() != null) {
-            method.addParameter(ParameterSpec.builder(ClassName.get(String.class), Naming.parameter(locator.pathParam()))
+            method.addParameter(ParameterSpec.builder(locator.pathParamType(), Naming.parameter(locator.pathParam()))
                     .addAnnotation(AnnotationSpec.builder(PathParam.class)
                             .addMember("value", "$S", locator.pathParam()).build())
                     .build());

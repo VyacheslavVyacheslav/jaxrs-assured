@@ -1,6 +1,7 @@
 package io.github.vyacheslavvyacheslav.jaxrsassured.codegen;
 
 import com.squareup.javapoet.ClassName;
+import com.squareup.javapoet.ParameterizedTypeName;
 import com.squareup.javapoet.TypeName;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
@@ -12,6 +13,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -28,8 +30,16 @@ import java.util.Set;
  *         сегмент-параметр {id} → Pascal(singular(родительского сегмента)); прочие параметры ({locationId})
  *         → Pascal(параметра) — у узла бывает несколько параметризованных потомков;</li>
  *     <li>{param} без детей — ручки инлайнятся в родительский интерфейс с @Path("{param}");</li>
+ *     <li>{param} с детьми — локатор с @PathParam; тип — общий для ручек поддерева (разные числовые — Number),
+ *         при расхождении String;</li>
  *     <li>имя метода — operationId без префикса контроллера ("XxxController_findOne" → findOne),
  *         при коллизии в интерфейсе — полный operationId;</li>
+ *     <li>встроенный enum параметра (и массив таких) — вложенный энум интерфейса: status → Resource.Status;</li>
+ *     <li>query-параметров больше beanParamThreshold — бин @BeanParam, вложенный класс &lt;Метод&gt;Params;</li>
+ *     <li>header-параметры из ignoreHeaders (без учета регистра) не становятся параметрами метода —
+ *         их ставят фильтры клиента или setHeader;</li>
+ *     <li>тело — параметр-DTO и @Consumes; необязательное тело (requestBody.required false или не указан —
+ *         по стандарту OpenAPI это false) — ещё и перегрузка без тела и без @Consumes;</li>
  *     <li>ответ — первый media type минимального 2xx: text/event-stream → InputStream (поток не кончается,
  *         String ждал бы его конца вечно), string/binary → byte[] (String испортил бы zip), иначе тип схемы;
  *         не-JSON ответ → @Produces с этим media type.</li>
@@ -39,11 +49,17 @@ final class ResourceModelBuilder {
 
     private static final Set<String> SUPPORTED_HTTP = Set.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS");
     private static final TypeName INPUT_STREAM = ClassName.get(InputStream.class);
+    private static final TypeName STRING = ClassName.get(String.class);
+    /** Числовые типы параметров: у локатора их смесь сводится к Number. */
+    private static final Set<TypeName> NUMERIC = Set.of(TypeName.INT.box(), TypeName.LONG.box(),
+            TypeName.DOUBLE.box(), TypeName.FLOAT.box(), SchemaTypes.NUMBER);
 
     private final GenConfig config;
     private final SchemaTypes types;
     private final List<String> warnings = new ArrayList<>();
     private final Map<String, Set<String>> takenNames = new HashMap<>();
+    /** Заголовки из ignoreHeaders, которые встретились в ручках: остальные — повод для WARN (опечатка?). */
+    private final Set<String> matchedIgnoredHeaders = new HashSet<>();
 
     ResourceModelBuilder(GenConfig config, SchemaTypes types) {
         this.config = config;
@@ -63,12 +79,17 @@ final class ResourceModelBuilder {
         for (PathTree.Node top : root.children().values()) {
             String groupPackage = config.resourcesPackage() + "." + Naming.packageSegment(top.name());
             String groupClass = Naming.pascal(top.name()) + "Resource";
-            rootLocators.add(new LocatorModel("get" + groupClass, top.name(), null, groupPackage, groupClass));
+            rootLocators.add(new LocatorModel("get" + groupClass, top.name(), null, null, groupPackage, groupClass));
             interfaceOf(top, groupPackage, Naming.pascal(top.name()), true, models);
         }
 
         models.add(0, new ResourceModel(config.basePackage(), config.rootClassName(),
-                config.rootPath(), List.of(), rootLocators));
+                config.rootPath(), List.of(), rootLocators, List.of(), List.of()));
+        config.ignoreHeaders().stream()
+                .filter(header -> !matchedIgnoredHeaders.contains(header))
+                .sorted()
+                .forEach(header -> warnings.add("Заголовок " + header + " из ignoreHeaders (--ignore-header) "
+                        + "не встретился ни в одной ручке"));
         return models;
     }
 
@@ -109,14 +130,15 @@ final class ResourceModelBuilder {
         register(packageName, className, node.fullPath());
 
         Set<String> usedNames = new HashSet<>();
-        List<OperationModel> operations = new ArrayList<>(operationsOf(node, null, usedNames));
+        NestedTypes nested = new NestedTypes(packageName, className);
+        List<OperationModel> operations = new ArrayList<>(operationsOf(node, null, usedNames, nested));
         List<LocatorModel> locators = new ArrayList<>();
         String childrenBase = groupRoot ? Naming.pascal(Naming.singular(node.name())) : ownBase;
 
         for (PathTree.Node child : node.children().values()) {
             boolean childIsParam = child.name().startsWith("{");
             if (childIsParam && child.childrenCount() == 0) {
-                operations.addAll(operationsOf(child, child.name(), usedNames));
+                operations.addAll(operationsOf(child, child.name(), usedNames, nested));
                 continue;
             }
             String childBase = childIsParam
@@ -126,11 +148,13 @@ final class ResourceModelBuilder {
             String locatorName = childIsParam
                     ? "get" + childBase + "Resource"
                     : "get" + Naming.pascal(child.name()) + "Resource";
-            locators.add(new LocatorModel(locatorName, child.name(),
-                    childIsParam ? child.name().substring(1, child.name().length() - 1) : null,
+            String pathParam = childIsParam ? child.name().substring(1, child.name().length() - 1) : null;
+            locators.add(new LocatorModel(locatorName, child.name(), pathParam,
+                    childIsParam ? locatorParamType(child, pathParam) : null,
                     childModel.packageName(), childModel.className()));
         }
-        ResourceModel model = new ResourceModel(packageName, className, null, operations, locators);
+        ResourceModel model = new ResourceModel(packageName, className, null, operations, locators,
+                nested.enums(), nested.beans());
         models.add(model);
         return model;
     }
@@ -147,8 +171,69 @@ final class ResourceModelBuilder {
                 : Naming.pascalParam(param);
     }
 
+    /**
+     * Тип параметра локатора {param}. В OpenAPI тип параметра пути объявляет каждая ручка, а локатор обслуживает
+     * все ручки своего поддерева: тип берётся, если все объявившие его ручки согласны (number → Number,
+     * $ref на энум → энум — как у параметров ручек). Разные числовые (integer в одной ручке, number в другой) —
+     * Number: он принимает любое из них. Разошлись иначе — String и WARN; ни одна не объявила — String.
+     */
+    private TypeName locatorParamType(PathTree.Node node, String param) {
+        Map<TypeName, List<String>> declared = new LinkedHashMap<>();
+        collectPathParamTypes(node, param, declared);
+        if (declared.size() == 1) {
+            return declared.keySet().iterator().next();
+        }
+        if (declared.size() > 1 && NUMERIC.containsAll(declared.keySet())) {
+            return SchemaTypes.NUMBER;
+        }
+        if (declared.size() > 1) {
+            List<String> variants = new ArrayList<>();
+            declared.forEach((type, operations) -> variants.add(simpleName(type) + ": " + String.join(", ", operations)));
+            warnings.add("Параметр пути {" + param + "} в ручках под " + node.fullPath() + " объявлен с разными типами ("
+                    + String.join("; ", variants) + ") — у локатора будет String");
+        }
+        return STRING;
+    }
+
+    /** Типы параметра param во всех ручках поддерева node: тип → ручки, где он так объявлен. */
+    private void collectPathParamTypes(PathTree.Node node, String param, Map<TypeName, List<String>> declared) {
+        if (node.item() != null) {
+            for (Map.Entry<PathItem.HttpMethod, Operation> entry : node.item().readOperationsMap().entrySet()) {
+                Parameter parameter = pathParameter(node.item(), entry.getValue(), param);
+                if (parameter != null) {
+                    declared.computeIfAbsent(types.paramType(parameter.getSchema()), type -> new ArrayList<>())
+                            .add(entry.getKey().name() + " " + node.fullPath());
+                }
+            }
+        }
+        for (PathTree.Node child : node.children().values()) {
+            collectPathParamTypes(child, param, declared);
+        }
+    }
+
+    /** Объявление параметра пути в ручке; объявление на самой ручке важнее общего для пути (parameters у path item). */
+    private static Parameter pathParameter(PathItem item, Operation operation, String name) {
+        Parameter own = pathParameter(operation.getParameters(), name);
+        return own != null ? own : pathParameter(item.getParameters(), name);
+    }
+
+    private static Parameter pathParameter(List<Parameter> parameters, String name) {
+        if (parameters == null) {
+            return null;
+        }
+        return parameters.stream()
+                .filter(parameter -> "path".equals(parameter.getIn()) && name.equals(parameter.getName()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static String simpleName(TypeName type) {
+        return type instanceof ClassName className ? className.simpleName() : type.toString();
+    }
+
     /** Ручки узла; с inlinePath ({param}-лист) ручки уходят в родителя с @Path("{param}"). */
-    private List<OperationModel> operationsOf(PathTree.Node node, String inlinePath, Set<String> usedNames) {
+    private List<OperationModel> operationsOf(PathTree.Node node, String inlinePath, Set<String> usedNames,
+                                              NestedTypes nested) {
         if (node.item() == null) {
             return List.of();
         }
@@ -160,7 +245,11 @@ final class ResourceModelBuilder {
                 warnings.add("HTTP-метод не поддержан, ручка пропущена: " + http + " " + node.fullPath());
                 continue;
             }
-            List<ParamModel> params = paramsOf(operation, inlinePath, node);
+            // имя метода — до параметров: с ним различаются вложенные энумы одноимённых параметров
+            String methodName = methodName(operation, http, node, usedNames);
+            List<ParamModel> params = withBeanParam(paramsOf(operation, inlinePath, node, methodName, nested),
+                    methodName, nested);
+            List<ParamModel> withoutBody = uniqueVarNames(params);
             String mediaType = consumes(operation);
             if (mediaType != null) {
                 params = new ArrayList<>(params);
@@ -168,9 +257,14 @@ final class ResourceModelBuilder {
                         bodyType(operation, mediaType)));
             }
             Response response = response(operation, node);
-            result.add(new OperationModel(http, inlinePath == null ? "" : inlinePath,
-                    methodName(operation, http, node, usedNames), uniqueVarNames(params), mediaType,
+            String path = inlinePath == null ? "" : inlinePath;
+            result.add(new OperationModel(http, path, methodName, uniqueVarNames(params), mediaType,
                     response.produces(), response.type()));
+            if (mediaType != null && !Boolean.TRUE.equals(operation.getRequestBody().getRequired())) {
+                // тело необязательно: перегрузка без тела и без @Consumes — запрос без тела уйдёт без Content-Type
+                result.add(new OperationModel(http, path, methodName, withoutBody, null,
+                        response.produces(), response.type()));
+            }
         }
         return result;
     }
@@ -198,7 +292,8 @@ final class ResourceModelBuilder {
         return List.copyOf(result);
     }
 
-    private List<ParamModel> paramsOf(Operation operation, String inlinePath, PathTree.Node node) {
+    private List<ParamModel> paramsOf(Operation operation, String inlinePath, PathTree.Node node, String methodName,
+                                      NestedTypes nested) {
         List<ParamModel> params = new ArrayList<>();
         if (operation.getParameters() == null) {
             return params;
@@ -208,14 +303,21 @@ final class ResourceModelBuilder {
                 case "path" -> {
                     if (inlinePath != null) {
                         params.add(new ParamModel(ParamModel.In.PATH, parameter.getName(),
-                                Naming.parameter(parameter.getName()), types.paramType(parameter.getSchema())));
+                                Naming.parameter(parameter.getName()), paramType(parameter, methodName, nested)));
                     }
                     // без инлайна параметр пути уже съеден локаторами родителей
                 }
                 case "query" -> params.add(new ParamModel(ParamModel.In.QUERY, parameter.getName(),
-                        Naming.parameter(parameter.getName()), types.paramType(parameter.getSchema())));
-                case "header" -> params.add(new ParamModel(ParamModel.In.HEADER, parameter.getName(),
-                        Naming.parameter(parameter.getName()), types.paramType(parameter.getSchema())));
+                        Naming.parameter(parameter.getName()), paramType(parameter, methodName, nested)));
+                case "header" -> {
+                    if (config.ignoredHeader(parameter.getName())) {
+                        // заголовок ставит фильтр клиента или setHeader — параметром метода не нужен
+                        matchedIgnoredHeaders.add(GenConfig.headerKey(parameter.getName()));
+                    } else {
+                        params.add(new ParamModel(ParamModel.In.HEADER, parameter.getName(),
+                                Naming.parameter(parameter.getName()), paramType(parameter, methodName, nested)));
+                    }
+                }
                 case "cookie" -> warnings.add("Cookie-параметр пропущен: " + parameter.getName()
                         + " (" + node.fullPath() + ")");
                 default -> warnings.add("Параметр без in пропущен: " + parameter.getName()
@@ -223,6 +325,112 @@ final class ResourceModelBuilder {
             }
         }
         return params;
+    }
+
+    /**
+     * Тип параметра ручки: встроенный enum (и массив таких) — вложенный энум интерфейса, как у свойств DTO;
+     * остальное — как решает SchemaTypes.
+     */
+    private TypeName paramType(Parameter parameter, String methodName, NestedTypes nested) {
+        Schema<?> schema = parameter.getSchema();
+        if (isInlineEnum(schema)) {
+            return nested.enumFor(parameter.getName(), methodName, schema.getEnum());
+        }
+        if (schema != null && "array".equals(schema.getType()) && isInlineEnum(schema.getItems())) {
+            return ParameterizedTypeName.get(ClassName.get(List.class),
+                    nested.enumFor(parameter.getName(), methodName, schema.getItems().getEnum()));
+        }
+        return types.paramType(schema);
+    }
+
+    private static boolean isInlineEnum(Schema<?> schema) {
+        return schema != null && schema.get$ref() == null && schema.getEnum() != null && !schema.getEnum().isEmpty();
+    }
+
+    /**
+     * Query-параметров больше порога (beanParamThreshold) — они уходят в бин @BeanParam на месте первого из них;
+     * параметры пути и заголовки остаются в сигнатуре: их мало, и они задают адрес и окружение запроса.
+     */
+    private List<ParamModel> withBeanParam(List<ParamModel> params, String methodName, NestedTypes nested) {
+        List<ParamModel> query = params.stream().filter(p -> p.in() == ParamModel.In.QUERY).toList();
+        int threshold = config.beanParamThreshold();
+        if (threshold == 0 || query.size() <= threshold) {
+            return params;
+        }
+        ClassName bean = nested.beanFor(methodName, uniqueVarNames(query));
+        List<ParamModel> result = new ArrayList<>();
+        boolean beanAdded = false;
+        for (ParamModel param : params) {
+            if (param.in() != ParamModel.In.QUERY) {
+                result.add(param);
+            } else if (!beanAdded) {
+                result.add(new ParamModel(ParamModel.In.BEAN, "params", "params", bean));
+                beanAdded = true;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Вложенные типы интерфейса.
+     * <ul>
+     *     <li>Энумы встроенных enum параметров. Имя — Pascal(имя параметра): status → Status. Те же значения
+     *         под тем же именем — тот же энум; другие значения — с префиксом метода (UpdateStatus),
+     *         дальше — с номером (Status2).</li>
+     *     <li>Бины @BeanParam query-параметров ручки: &lt;Метод&gt;Params (LocateParams), поля — в порядке спеки.</li>
+     * </ul>
+     */
+    private final class NestedTypes {
+
+        private final String packageName;
+        private final String className;
+        private final Map<String, EnumModel> byName = new LinkedHashMap<>();
+        private final Map<String, DtoModel> beans = new LinkedHashMap<>();
+
+        NestedTypes(String packageName, String className) {
+            this.packageName = packageName;
+            this.className = className;
+        }
+
+        ClassName enumFor(String paramName, String methodName, List<?> values) {
+            String base = Naming.pascalParam(paramName);
+            List<EnumModel.Constant> constants = EnumModel.constantsOf(values, className + "." + base, warnings);
+            String name = base;
+            for (int attempt = 1; ; attempt++) {
+                EnumModel existing = byName.get(name);
+                if (existing == null) {
+                    byName.put(name, new EnumModel(name, constants));
+                    break;
+                }
+                if (existing.constants().equals(constants)) {
+                    break;
+                }
+                name = attempt == 1 ? Naming.pascalParam(methodName) + base : base + attempt;
+            }
+            return ClassName.get(packageName, className, name);
+        }
+
+        /** Бин query-параметров ручки; поле — имя query-параметра (jsonName) и Java-имя и тип параметра. */
+        ClassName beanFor(String methodName, List<ParamModel> query) {
+            String base = Naming.pascalParam(methodName) + "Params";
+            String name = base;
+            for (int i = 2; beans.containsKey(name) || byName.containsKey(name); i++) {
+                name = base + i;
+            }
+            List<FieldModel> fields = query.stream()
+                    .map(p -> new FieldModel(p.paramName(), p.varName(), p.typeName(), false, null))
+                    .toList();
+            beans.put(name, new DtoModel(packageName, name, null, List.of(), fields, List.of(), null, className));
+            return ClassName.get(packageName, className, name);
+        }
+
+        List<EnumModel> enums() {
+            return List.copyOf(byName.values());
+        }
+
+        List<DtoModel> beans() {
+            return List.copyOf(beans.values());
+        }
     }
 
     /** operationId "XxxController_findOne" → findOne; при коллизии в интерфейсе — полный operationId. */

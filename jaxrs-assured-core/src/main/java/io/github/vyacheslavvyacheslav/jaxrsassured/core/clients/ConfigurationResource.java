@@ -4,7 +4,7 @@ import io.github.vyacheslavvyacheslav.jaxrsassured.core.annotations.Configurable
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.annotations.HttpConfigurableType;
 
 /**
- * Настройка запроса на ходу: заголовки, cookie, query-параметры, тело. Методы не являются HTTP-эндпоинтами:
+ * Настройка запроса на ходу: заголовки, cookie, query-параметры, параметры пути, тело. Методы не являются HTTP-эндпоинтами:
  * прокси перехватывает их по аннотации ConfigurableRequest.
  * <p>
  * Ресурс — объект со своими настройками: {@code set...}/{@code delete...} меняют только тот ресурс,
@@ -20,11 +20,12 @@ import io.github.vyacheslavvyacheslav.jaxrsassured.core.annotations.HttpConfigur
  *
  * // негативные проверки — то, что не пропускают типизированные параметры метода
  * books.assured(r -> r.setQueryParam("limit", "abc").findAll(1, 20, null, null)).statusCode(400);
+ * books.assured(r -> r.setPathParam("id", "abc").findOne(7)).statusCode(400);
  * books.assured(r -> r.setBody("{\"price\": \"free\"}").patch(7, new PatchBookDto())).statusCode(400);
  * }</pre>
  * Повторная настройка того же заголовка (без учета регистра), той же cookie, того же параметра или тела заменяет предыдущую.
- * Настройка применяется после параметров метода (@HeaderParam, @QueryParam, @CookieParam, тело) и обычных фильтров,
- * поэтому перекрывает и их значения (например, Authorization).
+ * Настройка применяется после параметров метода (@HeaderParam, @QueryParam, @PathParam, @CookieParam, тело),
+ * значений локаторов и обычных фильтров, поэтому перекрывает и их значения (например, Authorization).
  * Текущую настройку показывает {@code toString()} ресурса.
  * Настроенный ресурс не стоит хранить в static-поле: его изменения увидят все тесты.
  * Ответ для проверок вместо DTO — {@link AssuredResource#assured}.
@@ -69,6 +70,15 @@ public interface ConfigurationResource<T> extends AssuredResource<T> {
     T deleteQueryParam(String name);
 
     /**
+     * Задает значение параметра пути {name} для всех следующих вызовов, заменяя и значение из @PathParam метода,
+     * и значение, переданное в локатор подресурса выше по дереву. Значение уходит строкой как есть (кодируется
+     * как сегмент пути): можно отправить то, что не пропускает типизированный параметр.
+     * Если в пути вызова нет {name}, на вызов не влияет.
+     */
+    @ConfigurableRequest(HttpConfigurableType.PATH_PARAM)
+    T setPathParam(String name, Object value);
+
+    /**
      * Подменяет тело запроса строкой как есть (например, битым JSON вместо DTO) с итоговым Content-Type.
      * По смыслу — одноразовая настройка: удобнее всего внутри {@link AssuredResource#assured}.
      * Для GET RestEasy тело не отправит и бросит ошибку.
@@ -77,8 +87,8 @@ public interface ConfigurationResource<T> extends AssuredResource<T> {
     T setBody(String body);
 
     /**
-     * Снимает все настройки этого ресурса — заголовки, cookie, query-параметры, тело,
-     * включая унаследованные от родительского ресурса.
+     * Снимает все настройки этого ресурса — заголовки, cookie, query-параметры, параметры пути, тело,
+     * включая унаследованные от родительского ресурса. Значения, переданные в локаторы, остаются: это адрес ресурса.
      */
     @ConfigurableRequest(HttpConfigurableType.RESET)
     T reset();

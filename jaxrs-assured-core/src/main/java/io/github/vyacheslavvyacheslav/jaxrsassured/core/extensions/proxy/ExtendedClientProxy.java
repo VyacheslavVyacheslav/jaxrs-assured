@@ -13,6 +13,7 @@ import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.parameters.Re
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.parameters.SetBody;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.parameters.SetCookieParam;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.parameters.SetHeaderParam;
+import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.parameters.SetPathParam;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.parameters.SetQueryParam;
 import io.github.vyacheslavvyacheslav.jaxrsassured.core.extensions.response.AssuredResponse;
 
@@ -61,6 +62,7 @@ public class ExtendedClientProxy extends ClientProxy {
                     case DELETE_COOKIE -> addSetting(new DeleteCookieParam((String) args[0]));
                     case QUERY_PARAM -> addSetting(new SetQueryParam((String) args[0], values(args)));
                     case DELETE_QUERY_PARAM -> addSetting(new DeleteQueryParam((String) args[0]));
+                    case PATH_PARAM -> addSetting(new SetPathParam((String) args[0], args[1]));
                     case BODY -> addSetting(new SetBody((String) args[0]));
                     case RESET -> requestConfiguration.set(RequestConfiguration.EMPTY);
                 }
